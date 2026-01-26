@@ -39,6 +39,13 @@ Extracts:
 - File + line number
 - Usage context (read/write/list)
 
+## Quick Start
+
+```bash
+make build
+./bin/s3spectre scan --repo .
+./bin/s3spectre scan --repo . --fail-on-missing
+
 ### 2. AWS S3 Inspector (Runtime Metadata)
 
 Queries AWS via AWS SDK to collect:
