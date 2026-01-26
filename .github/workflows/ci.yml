@@ -7,8 +7,8 @@ on:
     branches: [ main ]
 
 jobs:
-  test:
-    name: Test
+  build:
+    name: Build
     runs-on: ubuntu-latest
     steps:
       - name: Check out code
@@ -22,8 +22,30 @@ jobs:
       - name: Get dependencies
         run: go mod download
 
-      - name: Build
+      - name: Build binary
         run: make build
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: s3spectre-linux-amd64
+          path: bin/s3spectre
+
+  test:
+    name: Test
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Get dependencies
+        run: go mod download
 
       - name: Run tests
         run: make test
