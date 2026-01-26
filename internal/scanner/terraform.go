@@ -12,7 +12,6 @@ var (
 	tfS3BucketResource = regexp.MustCompile(`resource\s+"aws_s3_bucket"\s+"[^"]+"\s+\{`)
 	tfBucketNameAttr   = regexp.MustCompile(`bucket\s+=\s+"([^"]+)"`)
 	tfS3ObjectResource = regexp.MustCompile(`resource\s+"aws_s3_(?:bucket_)?object"\s+"[^"]+"\s+\{`)
-	tfKeyAttr          = regexp.MustCompile(`key\s+=\s+"([^"]+)"`)
 )
 
 // scanTerraform scans Terraform files for S3 bucket references

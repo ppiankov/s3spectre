@@ -199,22 +199,6 @@ func (i *Inspector) getBucketRegion(ctx context.Context, bucket string) (string,
 	return string(locationResult.LocationConstraint), nil
 }
 
-// listAllBuckets lists all S3 buckets in the account
-func (i *Inspector) listAllBuckets(ctx context.Context) (map[string]bool, error) {
-	result, err := i.client.s3Client.ListBuckets(ctx, &s3.ListBucketsInput{})
-	if err != nil {
-		return nil, err
-	}
-
-	buckets := make(map[string]bool)
-	for _, bucket := range result.Buckets {
-		if bucket.Name != nil {
-			buckets[*bucket.Name] = true
-		}
-	}
-
-	return buckets, nil
-}
 
 // inspectBucket inspects a single bucket
 func (i *Inspector) inspectBucket(ctx context.Context, bucket string, refs []scanner.Reference) *BucketInfo {
@@ -259,7 +243,7 @@ func (i *Inspector) inspectBucket(ctx context.Context, bucket string, refs []sca
 	}
 
 	// Get lifecycle configuration
-	err = regionClient.WithRetry(ctx, func() error {
+	_ = regionClient.WithRetry(ctx, func() error {
 		lifecycleResult, err := regionClient.s3Client.GetBucketLifecycleConfiguration(ctx, &s3.GetBucketLifecycleConfigurationInput{
 			Bucket: aws.String(bucket),
 		})
@@ -272,12 +256,10 @@ func (i *Inspector) inspectBucket(ctx context.Context, bucket string, refs []sca
 		}
 		return err
 	})
-	if err != nil && !contains(err.Error(), "NoSuchLifecycleConfiguration") {
-		// Non-fatal, continue
-	}
+	// Non-fatal error, continue
 
 	// Get bucket tagging for unused detection
-	err = regionClient.WithRetry(ctx, func() error {
+	_ = regionClient.WithRetry(ctx, func() error {
 		taggingResult, err := regionClient.s3Client.GetBucketTagging(ctx, &s3.GetBucketTaggingInput{
 			Bucket: aws.String(bucket),
 		})
@@ -295,9 +277,10 @@ func (i *Inspector) inspectBucket(ctx context.Context, bucket string, refs []sca
 		}
 		return err
 	})
+	// Non-fatal error, continue
 
 	// Check if bucket is empty (for unused detection)
-	err = regionClient.WithRetry(ctx, func() error {
+	_ = regionClient.WithRetry(ctx, func() error {
 		listResult, err := regionClient.s3Client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
 			Bucket:  aws.String(bucket),
 			MaxKeys: aws.Int32(1),
@@ -307,6 +290,7 @@ func (i *Inspector) inspectBucket(ctx context.Context, bucket string, refs []sca
 		}
 		return err
 	})
+	// Non-fatal error, continue
 
 	// Inspect prefixes
 	prefixes := i.extractPrefixes(refs)
@@ -356,11 +340,6 @@ func (i *Inspector) extractPrefixes(refs []scanner.Reference) []string {
 	return prefixes
 }
 
-// inspectPrefixes inspects multiple prefixes (deprecated, use inspectPrefixesWithClient)
-func (i *Inspector) inspectPrefixes(ctx context.Context, bucket string, prefixes []string) []PrefixInfo {
-	return i.inspectPrefixesWithClient(ctx, i.client, bucket, prefixes)
-}
-
 // inspectPrefixesWithClient inspects multiple prefixes using a specific client
 func (i *Inspector) inspectPrefixesWithClient(ctx context.Context, client *Client, bucket string, prefixes []string) []PrefixInfo {
 	var results []PrefixInfo
@@ -387,11 +366,6 @@ func (i *Inspector) inspectPrefixesWithClient(ctx context.Context, client *Clien
 	wg.Wait()
 
 	return results
-}
-
-// inspectPrefix inspects a single prefix (deprecated, use inspectPrefixWithClient)
-func (i *Inspector) inspectPrefix(ctx context.Context, bucket, prefix string) PrefixInfo {
-	return i.inspectPrefixWithClient(ctx, i.client, bucket, prefix)
 }
 
 // inspectPrefixWithClient inspects a single prefix using a specific client
