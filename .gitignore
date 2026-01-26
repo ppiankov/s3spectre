@@ -17,7 +17,7 @@ go.work
 # Build output
 /bin/
 /dist/
-s3spectre
+/s3spectre
 
 # IDE
 .idea/
