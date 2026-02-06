@@ -1,6 +1,11 @@
 # S3Spectre
 
-S3Spectre is a Go-based static + runtime auditor for AWS S3 usage. It scans your application codebase for S3 bucket and object references, compares those to the actual AWS S3 state, and detects missing or unused buckets, stale prefixes, version sprawl, and lifecycle misconfigurations.
+S3Spectre is a Go-based static + runtime auditor for AWS S3 usage. It has two modes:
+
+1. **Scan Mode**: Scans your application codebase for S3 references and compares them to AWS S3 state to detect drift
+2. **Discover Mode**: Scans your AWS account directly to find unused, risky, or misconfigured S3 buckets without requiring code
+
+Both modes detect missing or unused buckets, stale prefixes, version sprawl, and lifecycle misconfigurations.
 
 Part of the [Spectre family](https://github.com/ppiankov) of infrastructure cleanup tools.
 
@@ -41,12 +46,25 @@ Extracts:
 
 ## Quick Start
 
+### Two Modes of Operation
+
+**1. Scan Mode** - Code + AWS correlation (finds drift between code and AWS):
 ```bash
 make build
 ./bin/s3spectre scan --repo .
-./bin/s3spectre scan --repo . --fail-on-missing
+```
 
-### 2. AWS S3 Inspector (Runtime Metadata)
+**2. Discover Mode** - AWS-only scanning (finds unused/risky buckets without code):
+```bash
+./bin/s3spectre discover
+./bin/s3spectre discover --check-encryption --check-public
+```
+
+See [Usage](#usage) section below for detailed examples.
+
+## Features (MVP)
+
+### 1. Repository Scanner (Static S3 Reference Extraction)
 
 Queries AWS via AWS SDK to collect:
 
@@ -122,7 +140,70 @@ make install
 
 ## Usage
 
-### Basic Scan
+### Discovery Mode (AWS-Only Scanning)
+
+Scan all S3 buckets in your AWS account without requiring code references. Perfect for initial AWS account audits, finding forgotten buckets, or detecting security risks.
+
+#### Basic Discovery
+
+```bash
+# Discover all buckets across all AWS regions
+s3spectre discover
+
+# Use specific AWS profile
+s3spectre discover --aws-profile production
+
+# Scan specific regions only
+s3spectre discover --regions us-east-1,us-west-2
+```
+
+#### Security Checks
+
+```bash
+# Check for missing encryption
+s3spectre discover --check-encryption
+
+# Check for public access
+s3spectre discover --check-public
+
+# Run all security checks
+s3spectre discover --check-encryption --check-public
+```
+
+#### Custom Thresholds
+
+```bash
+# Flag buckets older than 730 days (2 years)
+s3spectre discover --age-threshold-days 730
+
+# Flag buckets inactive for 365 days (1 year)
+s3spectre discover --inactive-days 365
+```
+
+#### CI/CD Integration
+
+```bash
+# Fail if unused buckets detected
+s3spectre discover --fail-on-unused
+
+# Fail if risky configurations found
+s3spectre discover --fail-on-risky
+
+# Both checks
+s3spectre discover --fail-on-unused --fail-on-risky
+```
+
+#### JSON Output
+
+```bash
+s3spectre discover --format json --output discovery-report.json
+```
+
+### Scan Mode (Code + AWS Correlation)
+
+Compare code references against actual AWS S3 state to detect drift.
+
+#### Basic Scan
 
 ```bash
 s3spectre scan --repo ./my-repo
@@ -200,6 +281,26 @@ s3spectre scan --repo . --no-progress
 ```
 
 ## Configuration Options
+
+### Discover Command Flags
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--aws-profile` | AWS profile to use | (default profile) |
+| `--all-regions` | Scan all enabled AWS regions | `true` |
+| `--regions` | Specific regions to scan (comma-separated) | (all regions) |
+| `--age-threshold-days` | Flag buckets older than N days | `365` |
+| `--inactive-days` | Flag buckets with no activity for N days | `180` |
+| `--check-encryption` | Check for missing encryption | `false` |
+| `--check-public` | Check for public access | `false` |
+| `--concurrency` | Max concurrent S3 API calls | `10` |
+| `--format, -f` | Output format: `text` or `json` | `text` |
+| `--output, -o` | Output file (default: stdout) | stdout |
+| `--fail-on-unused` | Exit with error if unused buckets found | `false` |
+| `--fail-on-risky` | Exit with error if risky configurations found | `false` |
+| `--no-progress` | Disable progress indicators | `false` |
+
+### Scan Command Flags
 
 | Flag | Description | Default |
 |------|-------------|---------|
