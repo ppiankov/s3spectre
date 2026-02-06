@@ -17,6 +17,9 @@ type BucketInfo struct {
 	Tags              map[string]string `json:"tags,omitempty"`
 	IsEmpty           bool              `json:"is_empty"`
 	ObjectCount       int               `json:"object_count,omitempty"`
+	TotalSize         int64             `json:"total_size,omitempty"`
+	TotalVersionSize  int64             `json:"total_version_size,omitempty"`
+	VersionCount      int               `json:"version_count,omitempty"`
 	Encryption        *EncryptionInfo   `json:"encryption,omitempty"`
 	PublicAccess      *PublicAccessInfo `json:"public_access,omitempty"`
 	Error             string            `json:"error,omitempty"`

@@ -585,15 +585,21 @@ func (i *Inspector) inspectBucketFull(ctx context.Context, bucket, region string
 				info.IsEmpty = *listResult.KeyCount == 0
 				info.ObjectCount = int(*listResult.KeyCount)
 
-				// Find most recent object modification
+				// Calculate size and find most recent object modification
 				var latest *time.Time
+				var totalSize int64
 				for _, obj := range listResult.Contents {
+					if obj.Size != nil {
+						totalSize += *obj.Size
+					}
 					if obj.LastModified != nil {
 						if latest == nil || obj.LastModified.After(*latest) {
 							latest = obj.LastModified
 						}
 					}
 				}
+
+				info.TotalSize = totalSize
 
 				if latest != nil {
 					info.LastActivity = latest
@@ -604,5 +610,61 @@ func (i *Inspector) inspectBucketFull(ctx context.Context, bucket, region string
 		return err
 	})
 
+	// For versioned buckets, calculate total version size and count
+	if info.VersioningEnabled {
+		i.calculateVersionSizes(ctx, regionClient, bucket, info)
+	}
+
 	return info
+}
+
+// calculateVersionSizes calculates total size of all versions in a bucket
+func (i *Inspector) calculateVersionSizes(ctx context.Context, client *Client, bucket string, info *BucketInfo) {
+	var totalVersionSize int64
+	var versionCount int
+	var keyMarker *string
+	var versionIDMarker *string
+
+	maxIterations := 100
+	iteration := 0
+
+	_ = client.WithRetry(ctx, func() error {
+		for iteration < maxIterations {
+			listVersionsResult, err := client.s3Client.ListObjectVersions(ctx, &s3.ListObjectVersionsInput{
+				Bucket:          aws.String(bucket),
+				MaxKeys:         aws.Int32(1000),
+				KeyMarker:       keyMarker,
+				VersionIdMarker: versionIDMarker,
+			})
+
+			if err != nil {
+				return err
+			}
+
+			if listVersionsResult.Versions != nil {
+				for _, version := range listVersionsResult.Versions {
+					if version.Size != nil {
+						totalVersionSize += *version.Size
+					}
+					versionCount++
+				}
+			}
+
+			if listVersionsResult.DeleteMarkers != nil {
+				versionCount += len(listVersionsResult.DeleteMarkers)
+			}
+
+			if listVersionsResult.IsTruncated != nil && *listVersionsResult.IsTruncated {
+				keyMarker = listVersionsResult.NextKeyMarker
+				versionIDMarker = listVersionsResult.NextVersionIdMarker
+				iteration++
+			} else {
+				break
+			}
+		}
+		return nil
+	})
+
+	info.TotalVersionSize = totalVersionSize
+	info.VersionCount = versionCount
 }

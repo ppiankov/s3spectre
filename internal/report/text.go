@@ -20,6 +20,21 @@ func NewTextReporter(w io.Writer) *TextReporter {
 	return &TextReporter{writer: w}
 }
 
+// formatBytes formats bytes into human-readable format
+func formatBytes(bytes int64) string {
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	div, exp := int64(unit), 0
+	for n := bytes / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	sizes := []string{"KB", "MB", "GB", "TB", "PB"}
+	return fmt.Sprintf("%.2f %s", float64(bytes)/float64(div), sizes[exp])
+}
+
 // Generate generates a text report
 func (r *TextReporter) Generate(data Data) error {
 	// Header
@@ -361,6 +376,22 @@ func (r *TextReporter) printDiscoveryFindings(buckets map[string]*analyzer.Bucke
 				color.MagentaString("[VERSION_SPRAWL]"),
 				bucket,
 				discovery.Region)
+
+			// Show size information
+			if discovery.BucketInfo != nil {
+				if discovery.BucketInfo.TotalVersionSize > 0 {
+					fmt.Fprintf(r.writer, "    Total Size (all versions): %s (%d versions)\n",
+						formatBytes(discovery.BucketInfo.TotalVersionSize),
+						discovery.BucketInfo.VersionCount)
+				}
+				if discovery.BucketInfo.TotalSize > 0 && discovery.BucketInfo.TotalVersionSize > discovery.BucketInfo.TotalSize {
+					overhead := discovery.BucketInfo.TotalVersionSize - discovery.BucketInfo.TotalSize
+					fmt.Fprintf(r.writer, "    Version Overhead: %s (%.1f%% of total)\n",
+						formatBytes(overhead),
+						float64(overhead)/float64(discovery.BucketInfo.TotalVersionSize)*100)
+				}
+			}
+
 			if len(discovery.RiskFactors) > 0 {
 				fmt.Fprintf(r.writer, "    Factors:\n")
 				for _, factor := range discovery.RiskFactors {
