@@ -10,6 +10,7 @@ import (
 // Reporter interface for different report formats
 type Reporter interface {
 	Generate(data Data) error
+	GenerateDiscovery(data DiscoveryData) error
 }
 
 // Data contains all report data

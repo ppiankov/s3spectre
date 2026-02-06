@@ -8,12 +8,34 @@ type BucketInfo struct {
 	Exists            bool              `json:"exists"`
 	Region            string            `json:"region,omitempty"`
 	CreationDate      *time.Time        `json:"creation_date,omitempty"`
+	LastActivity      *time.Time        `json:"last_activity,omitempty"`
+	DaysSinceActivity int               `json:"days_since_activity"`
+	AgeInDays         int               `json:"age_in_days"`
 	VersioningEnabled bool              `json:"versioning_enabled"`
 	LifecycleRules    int               `json:"lifecycle_rules"`
 	Prefixes          []PrefixInfo      `json:"prefixes,omitempty"`
 	Tags              map[string]string `json:"tags,omitempty"`
 	IsEmpty           bool              `json:"is_empty"`
+	ObjectCount       int               `json:"object_count,omitempty"`
+	Encryption        *EncryptionInfo   `json:"encryption,omitempty"`
+	PublicAccess      *PublicAccessInfo `json:"public_access,omitempty"`
 	Error             string            `json:"error,omitempty"`
+}
+
+// EncryptionInfo contains bucket encryption configuration
+type EncryptionInfo struct {
+	Enabled        bool   `json:"enabled"`
+	Algorithm      string `json:"algorithm,omitempty"` // AES256, aws:kms
+	KMSMasterKeyID string `json:"kms_key_id,omitempty"`
+}
+
+// PublicAccessInfo contains public access block configuration
+type PublicAccessInfo struct {
+	IsPublic              bool `json:"is_public"`
+	BlockPublicAcls       bool `json:"block_public_acls"`
+	IgnorePublicAcls      bool `json:"ignore_public_acls"`
+	BlockPublicPolicy     bool `json:"block_public_policy"`
+	RestrictPublicBuckets bool `json:"restrict_public_buckets"`
 }
 
 // PrefixInfo contains metadata about an S3 prefix

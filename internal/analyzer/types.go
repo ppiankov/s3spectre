@@ -4,13 +4,15 @@ package analyzer
 type Status string
 
 const (
-	StatusOK               Status = "OK"
-	StatusMissingBucket    Status = "MISSING_BUCKET"
-	StatusUnusedBucket     Status = "UNUSED_BUCKET"
-	StatusMissingPrefix    Status = "MISSING_PREFIX"
-	StatusStalePrefix      Status = "STALE_PREFIX"
-	StatusVersionSprawl    Status = "VERSION_SPRAWL"
+	StatusOK                 Status = "OK"
+	StatusMissingBucket      Status = "MISSING_BUCKET"
+	StatusUnusedBucket       Status = "UNUSED_BUCKET"
+	StatusMissingPrefix      Status = "MISSING_PREFIX"
+	StatusStalePrefix        Status = "STALE_PREFIX"
+	StatusVersionSprawl      Status = "VERSION_SPRAWL"
 	StatusLifecycleMisconfig Status = "LIFECYCLE_MISCONFIG"
+	StatusRisky              Status = "RISKY"
+	StatusInactive           Status = "INACTIVE"
 )
 
 // BucketAnalysis contains analysis results for a bucket

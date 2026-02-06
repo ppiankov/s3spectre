@@ -21,3 +21,10 @@ func (r *JSONReporter) Generate(data Data) error {
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(data)
 }
+
+// GenerateDiscovery generates a JSON discovery report
+func (r *JSONReporter) GenerateDiscovery(data DiscoveryData) error {
+	encoder := json.NewEncoder(r.writer)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(data)
+}

@@ -414,3 +414,195 @@ func (i *Inspector) inspectPrefixWithClient(ctx context.Context, client *Client,
 
 	return info
 }
+
+// DiscoverAllBuckets discovers and inspects all S3 buckets in the account without code references
+func (i *Inspector) DiscoverAllBuckets(ctx context.Context) (map[string]*BucketInfo, error) {
+	// Determine regions
+	regions, err := i.determineRegions(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to determine regions: %w", err)
+	}
+
+	i.reportProgress(0, 1, fmt.Sprintf("Discovering buckets across %d region(s)", len(regions)))
+
+	// List ALL buckets and their regions
+	i.reportProgress(0, 2, "Listing all S3 buckets")
+	awsBuckets, bucketRegions, bucketMetadata, err := i.listAllBucketsWithMetadata(ctx, regions)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list AWS buckets: %w", err)
+	}
+
+	// Inspect each bucket
+	bucketInfo := make(map[string]*BucketInfo)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	semaphore := make(chan struct{}, i.concurrency)
+
+	total := len(awsBuckets)
+	current := 0
+
+	for bucketName := range awsBuckets {
+		wg.Add(1)
+		go func(bucket string) {
+			defer wg.Done()
+			semaphore <- struct{}{}
+			defer func() { <-semaphore }()
+
+			region := bucketRegions[bucket]
+			metadata := bucketMetadata[bucket]
+			info := i.inspectBucketFull(ctx, bucket, region, metadata)
+
+			mu.Lock()
+			current++
+			i.reportProgress(current, total, fmt.Sprintf("Inspecting %s", bucket))
+			bucketInfo[bucket] = info
+			mu.Unlock()
+		}(bucketName)
+	}
+
+	wg.Wait()
+
+	return bucketInfo, nil
+}
+
+// bucketMetadata holds bucket-level metadata from ListBuckets
+type bucketMetadata struct {
+	CreationDate *time.Time
+}
+
+// listAllBucketsWithMetadata lists all buckets with their metadata
+func (i *Inspector) listAllBucketsWithMetadata(ctx context.Context, regions []string) (map[string]bool, map[string]string, map[string]*bucketMetadata, error) {
+	buckets := make(map[string]bool)
+	bucketRegions := make(map[string]string)
+	metadata := make(map[string]*bucketMetadata)
+
+	// ListBuckets returns all buckets regardless of region
+	var result *s3.ListBucketsOutput
+	err := i.client.WithRetry(ctx, func() error {
+		var err error
+		result, err = i.client.s3Client.ListBuckets(ctx, &s3.ListBucketsInput{})
+		return err
+	})
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to list buckets: %w", err)
+	}
+
+	// For each bucket, store metadata and determine region
+	for _, bucket := range result.Buckets {
+		if bucket.Name != nil {
+			bucketName := *bucket.Name
+			buckets[bucketName] = true
+
+			// Store creation date
+			metadata[bucketName] = &bucketMetadata{
+				CreationDate: bucket.CreationDate,
+			}
+
+			// Get bucket region
+			region, err := i.getBucketRegion(ctx, bucketName)
+			if err != nil {
+				region = i.client.GetRegion() // Fallback to default
+			}
+			bucketRegions[bucketName] = region
+		}
+	}
+
+	return buckets, bucketRegions, metadata, nil
+}
+
+// inspectBucketFull performs full inspection without needing code references
+func (i *Inspector) inspectBucketFull(ctx context.Context, bucket, region string, metadata *bucketMetadata) *BucketInfo {
+	info := &BucketInfo{
+		Name:   bucket,
+		Region: region,
+		Exists: true,
+	}
+
+	// Set creation date and age
+	if metadata != nil && metadata.CreationDate != nil {
+		info.CreationDate = metadata.CreationDate
+		info.AgeInDays = int(time.Since(*metadata.CreationDate).Hours() / 24)
+	}
+
+	// Create region-specific client if needed
+	regionClient := i.client
+	if region != i.client.GetRegion() {
+		regionClient = NewClientForRegion(i.client.GetConfig(), region)
+	}
+
+	// Get versioning status
+	_ = regionClient.WithRetry(ctx, func() error {
+		versioningResult, err := regionClient.s3Client.GetBucketVersioning(ctx, &s3.GetBucketVersioningInput{
+			Bucket: aws.String(bucket),
+		})
+		if err == nil {
+			info.VersioningEnabled = versioningResult.Status == types.BucketVersioningStatusEnabled
+		}
+		return err
+	})
+
+	// Get lifecycle configuration
+	_ = regionClient.WithRetry(ctx, func() error {
+		lifecycleResult, err := regionClient.s3Client.GetBucketLifecycleConfiguration(ctx, &s3.GetBucketLifecycleConfigurationInput{
+			Bucket: aws.String(bucket),
+		})
+		if err == nil && lifecycleResult.Rules != nil {
+			info.LifecycleRules = len(lifecycleResult.Rules)
+		}
+		if err != nil && contains(err.Error(), "NoSuchLifecycleConfiguration") {
+			return nil
+		}
+		return err
+	})
+
+	// Get bucket tagging
+	_ = regionClient.WithRetry(ctx, func() error {
+		taggingResult, err := regionClient.s3Client.GetBucketTagging(ctx, &s3.GetBucketTaggingInput{
+			Bucket: aws.String(bucket),
+		})
+		if err == nil && taggingResult.TagSet != nil {
+			info.Tags = make(map[string]string)
+			for _, tag := range taggingResult.TagSet {
+				if tag.Key != nil && tag.Value != nil {
+					info.Tags[*tag.Key] = *tag.Value
+				}
+			}
+		}
+		if err != nil && contains(err.Error(), "NoSuchTagSet") {
+			return nil
+		}
+		return err
+	})
+
+	// Check if empty and get last activity
+	_ = regionClient.WithRetry(ctx, func() error {
+		listResult, err := regionClient.s3Client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+			Bucket:  aws.String(bucket),
+			MaxKeys: aws.Int32(100), // Sample first 100 objects
+		})
+		if err == nil {
+			if listResult.KeyCount != nil {
+				info.IsEmpty = *listResult.KeyCount == 0
+				info.ObjectCount = int(*listResult.KeyCount)
+
+				// Find most recent object modification
+				var latest *time.Time
+				for _, obj := range listResult.Contents {
+					if obj.LastModified != nil {
+						if latest == nil || obj.LastModified.After(*latest) {
+							latest = obj.LastModified
+						}
+					}
+				}
+
+				if latest != nil {
+					info.LastActivity = latest
+					info.DaysSinceActivity = int(time.Since(*latest).Hours() / 24)
+				}
+			}
+		}
+		return err
+	})
+
+	return info
+}
