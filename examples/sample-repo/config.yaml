@@ -1,0 +1,14 @@
+# Sample configuration file with S3 references
+app:
+  name: sample-app
+  storage:
+    bucket: my-app-data-prod
+    backup_bucket: my-app-backups
+
+logging:
+  s3_bucket: app-logs-prod
+  prefix: /logs/application/
+
+media:
+  uploads: s3://user-uploads-prod/media/
+  thumbnails: s3://user-uploads-prod/thumbnails/
