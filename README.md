@@ -201,6 +201,7 @@ Key design decisions:
 - **IAM permissions required.** Needs `s3:ListBucket`, `s3:ListAllMyBuckets`, `s3:GetBucketLocation`, `s3:GetBucketVersioning`, `s3:GetLifecycleConfiguration`, and `s3:GetBucketTagging`. Missing permissions produce access-denied errors, not silent failures.
 - **No real-time monitoring.** S3Spectre is a point-in-time scanner, not a daemon. Run it in CI or on a schedule.
 - **Single AWS account.** Cross-account scanning is not supported.
+- **Progress line artifacts.** The TTY progress indicator uses carriage return without clearing the full line, so shorter bucket names leave trailing characters from the previous name. Cosmetic only.
 
 ## Roadmap
 
