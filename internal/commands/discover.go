@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 	"time"
@@ -49,7 +50,7 @@ func init() {
 	discoverCmd.Flags().BoolVar(&discoverFlags.checkEncryption, "check-encryption", false, "Check for missing encryption")
 	discoverCmd.Flags().BoolVar(&discoverFlags.checkPublic, "check-public", false, "Check for public access")
 	discoverCmd.Flags().IntVar(&discoverFlags.maxConcurrency, "concurrency", 10, "Max concurrent S3 API calls")
-	discoverCmd.Flags().StringVarP(&discoverFlags.outputFormat, "format", "f", "text", "Output format: text or json")
+	discoverCmd.Flags().StringVarP(&discoverFlags.outputFormat, "format", "f", "text", "Output format: text, json, or sarif")
 	discoverCmd.Flags().StringVarP(&discoverFlags.outputFile, "output", "o", "", "Output file (default: stdout)")
 	discoverCmd.Flags().BoolVar(&discoverFlags.failOnUnused, "fail-on-unused", false, "Exit with error if unused buckets found")
 	discoverCmd.Flags().BoolVar(&discoverFlags.failOnRisky, "fail-on-risky", false, "Exit with error if risky buckets found")
@@ -58,6 +59,7 @@ func init() {
 
 func runDiscover(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
+	start := time.Now()
 
 	// Check if we're running in a terminal
 	isTTY := term.IsTerminal(int(os.Stderr.Fd()))
@@ -92,9 +94,9 @@ func runDiscover(cmd *cobra.Command, args []string) error {
 	if showProgress {
 		inspector.SetProgressCallback(func(current, total int, message string) {
 			if total > 0 {
-				fmt.Fprintf(os.Stderr, "\r[%d/%d] %s", current, total, message)
+				slog.Debug("Discovery progress", slog.Int("current", current), slog.Int("total", total), slog.String("message", message))
 			} else {
-				fmt.Fprintf(os.Stderr, "\r%s", message)
+				slog.Debug("Discovery progress", slog.String("message", message))
 			}
 		})
 	}
@@ -104,9 +106,6 @@ func runDiscover(cmd *cobra.Command, args []string) error {
 	buckets, err := inspector.DiscoverAllBuckets(ctx)
 	if err != nil {
 		return enhanceError("bucket discovery", err, discoverFlags.maxConcurrency)
-	}
-	if showProgress {
-		fmt.Fprintf(os.Stderr, "\n")
 	}
 	printStatus("Discovered %d buckets", len(buckets))
 
@@ -146,24 +145,30 @@ func runDiscover(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return enhanceError("output file creation", err, discoverFlags.maxConcurrency)
 		}
-		defer f.Close()
+		defer func() { _ = f.Close() }()
 		writer = f
 	}
 
 	// Generate report
-	var reporter report.Reporter
-	switch discoverFlags.outputFormat {
-	case "json":
-		reporter = report.NewJSONReporter(writer)
-	case "text":
-		reporter = report.NewTextReporter(writer)
-	default:
-		return fmt.Errorf("unsupported output format: %s (supported: text, json)", discoverFlags.outputFormat)
+	reporter, err := selectReporter(discoverFlags.outputFormat, writer)
+	if err != nil {
+		return err
 	}
 
 	if err := reporter.GenerateDiscovery(reportData); err != nil {
 		return enhanceError("report generation", err, discoverFlags.maxConcurrency)
 	}
+
+	findingCount := len(results.Summary.UnusedBuckets) +
+		len(results.Summary.RiskyBuckets) +
+		len(results.Summary.InactiveBuckets) +
+		len(results.Summary.VersionSprawl)
+	slog.Info("Discovery complete",
+		slog.Int("bucket_count", results.Summary.TotalBuckets),
+		slog.Int("prefix_count", 0),
+		slog.Int("finding_count", findingCount),
+		slog.Duration("duration", time.Since(start)),
+	)
 
 	// Check exit conditions
 	if discoverFlags.failOnUnused && len(results.Summary.UnusedBuckets) > 0 {

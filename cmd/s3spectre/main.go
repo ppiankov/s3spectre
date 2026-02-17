@@ -1,7 +1,7 @@
 package main
 
 import (
-	"fmt"
+	"log/slog"
 	"os"
 
 	"github.com/ppiankov/s3spectre/internal/commands"
@@ -9,7 +9,7 @@ import (
 
 func main() {
 	if err := commands.Execute(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		slog.Warn("Command failed", "error", err)
 		os.Exit(1)
 	}
 }

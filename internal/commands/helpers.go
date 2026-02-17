@@ -2,13 +2,15 @@ package commands
 
 import (
 	"fmt"
-	"os"
+	"io"
+	"log/slog"
 	"strings"
+
+	"github.com/ppiankov/s3spectre/internal/report"
 )
 
-// printStatus prints a status message to stderr
 func printStatus(format string, args ...interface{}) {
-	fmt.Fprintf(os.Stderr, format+"\n", args...)
+	slog.Info(fmt.Sprintf(format, args...))
 }
 
 // enhanceError enhances an error with additional context and helpful suggestions
@@ -56,4 +58,17 @@ func enhanceError(operation string, err error, concurrency int) error {
 
 	// Default error with context
 	return fmt.Errorf("%s failed: %w", operation, err)
+}
+
+func selectReporter(format string, writer io.Writer) (report.Reporter, error) {
+	switch format {
+	case "json":
+		return report.NewJSONReporter(writer), nil
+	case "sarif":
+		return report.NewSARIFReporter(writer), nil
+	case "text":
+		return report.NewTextReporter(writer), nil
+	default:
+		return nil, fmt.Errorf("unsupported output format: %s (supported: text, json, sarif)", format)
+	}
 }
