@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 	"time"
@@ -54,7 +55,7 @@ func init() {
 	scanCmd.Flags().IntVar(&scanFlags.unusedThresholdDays, "unused-threshold-days", 180, "Days threshold for unused bucket detection")
 	scanCmd.Flags().BoolVar(&scanFlags.checkUnused, "check-unused", false, "Enable unused bucket detection")
 	scanCmd.Flags().IntVar(&scanFlags.maxConcurrency, "concurrency", 10, "Max concurrent S3 API calls")
-	scanCmd.Flags().StringVarP(&scanFlags.outputFormat, "format", "f", "text", "Output format: text or json")
+	scanCmd.Flags().StringVarP(&scanFlags.outputFormat, "format", "f", "text", "Output format: text, json, or sarif")
 	scanCmd.Flags().StringVarP(&scanFlags.outputFile, "output", "o", "", "Output file (default: stdout)")
 	scanCmd.Flags().BoolVar(&scanFlags.failOnMissing, "fail-on-missing", false, "Exit with error if missing buckets found")
 	scanCmd.Flags().BoolVar(&scanFlags.failOnStale, "fail-on-stale", false, "Exit with error if stale prefixes found")
@@ -66,6 +67,7 @@ func init() {
 
 func runScan(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
+	start := time.Now()
 
 	// Check if we're running in a terminal (for progress indicators)
 	isTTY := term.IsTerminal(int(os.Stderr.Fd()))
@@ -112,9 +114,9 @@ func runScan(cmd *cobra.Command, args []string) error {
 	if showProgress {
 		inspector.SetProgressCallback(func(current, total int, message string) {
 			if total > 0 {
-				fmt.Fprintf(os.Stderr, "\r[%d/%d] %s", current, total, message)
+				slog.Debug("Scan progress", slog.Int("current", current), slog.Int("total", total), slog.String("message", message))
 			} else {
-				fmt.Fprintf(os.Stderr, "\r%s", message)
+				slog.Debug("Scan progress", slog.String("message", message))
 			}
 		})
 	}
@@ -124,9 +126,6 @@ func runScan(cmd *cobra.Command, args []string) error {
 	bucketInfo, err := inspector.InspectBuckets(ctx, references)
 	if err != nil {
 		return enhanceError("S3 inspection", err, scanFlags.maxConcurrency)
-	}
-	if showProgress {
-		fmt.Fprintf(os.Stderr, "\n") // Clear progress line
 	}
 	printStatus("Inspected %d buckets", len(bucketInfo))
 
@@ -166,24 +165,44 @@ func runScan(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return enhanceError("output file creation", err, scanFlags.maxConcurrency)
 		}
-		defer f.Close()
+		defer func() { _ = f.Close() }()
 		writer = f
 	}
 
 	// Generate report
-	var reporter report.Reporter
-	switch scanFlags.outputFormat {
-	case "json":
-		reporter = report.NewJSONReporter(writer)
-	case "text":
-		reporter = report.NewTextReporter(writer)
-	default:
-		return fmt.Errorf("unsupported output format: %s (supported: text, json)", scanFlags.outputFormat)
+	reporter, err := selectReporter(scanFlags.outputFormat, writer)
+	if err != nil {
+		return err
 	}
 
 	if err := reporter.Generate(reportData); err != nil {
 		return enhanceError("report generation", err, scanFlags.maxConcurrency)
 	}
+
+	prefixCount := 0
+	prefixes := make(map[string]struct{})
+	for _, ref := range references {
+		if ref.Prefix == "" {
+			continue
+		}
+		key := ref.Bucket + "/" + ref.Prefix
+		if _, exists := prefixes[key]; !exists {
+			prefixes[key] = struct{}{}
+			prefixCount++
+		}
+	}
+	findingCount := len(analysis.Summary.MissingBuckets) +
+		len(analysis.Summary.UnusedBuckets) +
+		len(analysis.Summary.MissingPrefixes) +
+		len(analysis.Summary.StalePrefixes) +
+		len(analysis.Summary.VersionSprawl) +
+		len(analysis.Summary.LifecycleMisconfig)
+	slog.Info("Scan complete",
+		slog.Int("bucket_count", analysis.Summary.TotalBuckets),
+		slog.Int("prefix_count", prefixCount),
+		slog.Int("finding_count", findingCount),
+		slog.Duration("duration", time.Since(start)),
+	)
 
 	// Check exit conditions
 	if scanFlags.failOnMissing && len(analysis.Summary.MissingBuckets) > 0 {
