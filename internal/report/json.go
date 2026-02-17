@@ -17,6 +17,7 @@ func NewJSONReporter(w io.Writer) *JSONReporter {
 
 // Generate generates a JSON report
 func (r *JSONReporter) Generate(data Data) error {
+	data.Timestamp = data.Timestamp.UTC()
 	encoder := json.NewEncoder(r.writer)
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(data)
@@ -24,6 +25,7 @@ func (r *JSONReporter) Generate(data Data) error {
 
 // GenerateDiscovery generates a JSON discovery report
 func (r *JSONReporter) GenerateDiscovery(data DiscoveryData) error {
+	data.Timestamp = data.Timestamp.UTC()
 	encoder := json.NewEncoder(r.writer)
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(data)
