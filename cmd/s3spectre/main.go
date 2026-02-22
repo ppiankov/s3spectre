@@ -7,8 +7,14 @@ import (
 	"github.com/ppiankov/s3spectre/internal/commands"
 )
 
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
+
 func main() {
-	if err := commands.Execute(); err != nil {
+	if err := commands.Execute(version, commit, date); err != nil {
 		slog.Warn("Command failed", "error", err)
 		os.Exit(1)
 	}

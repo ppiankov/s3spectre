@@ -5,7 +5,12 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var verbose bool
+var (
+	verbose bool
+	version string
+	commit  string
+	date    string
+)
 
 var rootCmd = &cobra.Command{
 	Use:   "s3spectre",
@@ -20,8 +25,17 @@ Part of the Spectre family of infrastructure cleanup tools.`,
 	},
 }
 
-func Execute() error {
+// Execute runs the root command with injected build info.
+func Execute(v, c, d string) error {
+	version = v
+	commit = c
+	date = d
 	return rootCmd.Execute()
+}
+
+// GetVersion returns the current version.
+func GetVersion() string {
+	return version
 }
 
 func init() {
