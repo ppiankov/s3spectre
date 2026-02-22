@@ -34,6 +34,7 @@ var scanFlags struct {
 	failOnUnused        bool
 	includeReferences   bool
 	noProgress          bool
+	timeout             time.Duration
 }
 
 var scanCmd = &cobra.Command{
@@ -63,10 +64,19 @@ func init() {
 	scanCmd.Flags().BoolVar(&scanFlags.failOnUnused, "fail-on-unused", false, "Exit with error if unused buckets found")
 	scanCmd.Flags().BoolVar(&scanFlags.includeReferences, "include-references", false, "Include detailed reference list in output")
 	scanCmd.Flags().BoolVar(&scanFlags.noProgress, "no-progress", false, "Disable progress indicators")
+	scanCmd.Flags().DurationVar(&scanFlags.timeout, "timeout", 0, "Total operation timeout (e.g. 5m, 30s). 0 means no timeout")
 }
 
 func runScan(cmd *cobra.Command, args []string) error {
+	// Apply config file defaults for flags not explicitly set
+	applyConfigToScanFlags(cmd)
+
 	ctx := context.Background()
+	if scanFlags.timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, scanFlags.timeout)
+		defer cancel()
+	}
 	start := time.Now()
 
 	// Check if we're running in a terminal (for progress indicators)
@@ -219,4 +229,21 @@ func runScan(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+func applyConfigToScanFlags(cmd *cobra.Command) {
+	if !cmd.Flags().Lookup("aws-region").Changed && cfg.Region != "" {
+		scanFlags.awsRegion = cfg.Region
+	}
+	if !cmd.Flags().Lookup("stale-days").Changed && cfg.StaleDays > 0 {
+		scanFlags.staleThresholdDays = cfg.StaleDays
+	}
+	if !cmd.Flags().Lookup("format").Changed && cfg.Format != "" {
+		scanFlags.outputFormat = cfg.Format
+	}
+	if !cmd.Flags().Lookup("timeout").Changed {
+		if d := cfg.TimeoutDuration(); d > 0 {
+			scanFlags.timeout = d
+		}
+	}
 }
