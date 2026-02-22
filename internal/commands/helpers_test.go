@@ -52,7 +52,9 @@ func TestPrintStatus(t *testing.T) {
 }
 
 func TestGetVersion(t *testing.T) {
-	if GetVersion() != version {
-		t.Fatalf("expected version %q, got %q", version, GetVersion())
+	version = "1.2.3"
+	t.Cleanup(func() { version = "" })
+	if GetVersion() != "1.2.3" {
+		t.Fatalf("expected version %q, got %q", "1.2.3", GetVersion())
 	}
 }
