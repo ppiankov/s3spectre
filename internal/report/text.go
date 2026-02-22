@@ -38,7 +38,11 @@ func formatBytes(bytes int64) string {
 // Generate generates a text report
 func (r *TextReporter) Generate(data Data) error {
 	// Header
-	_, _ = fmt.Fprintf(r.writer, "S3Spectre Report\n")
+	if data.Version != "" {
+		_, _ = fmt.Fprintf(r.writer, "S3Spectre %s\n", data.Version)
+	} else {
+		_, _ = fmt.Fprintf(r.writer, "S3Spectre Report\n")
+	}
 	_, _ = fmt.Fprintf(r.writer, "================\n\n")
 	_, _ = fmt.Fprintf(r.writer, "Scan Time: %s\n", data.Timestamp.Format("2006-01-02 15:04:05"))
 	_, _ = fmt.Fprintf(r.writer, "Repository: %s\n", data.Config.RepoPath)
@@ -230,7 +234,11 @@ func (r *TextReporter) printFindings(buckets map[string]*analyzer.BucketAnalysis
 // GenerateDiscovery generates a text discovery report
 func (r *TextReporter) GenerateDiscovery(data DiscoveryData) error {
 	// Header
-	_, _ = fmt.Fprintf(r.writer, "S3Spectre Discovery Report\n")
+	if data.Version != "" {
+		_, _ = fmt.Fprintf(r.writer, "S3Spectre %s — Discovery\n", data.Version)
+	} else {
+		_, _ = fmt.Fprintf(r.writer, "S3Spectre Discovery Report\n")
+	}
 	_, _ = fmt.Fprintf(r.writer, "===========================\n\n")
 	_, _ = fmt.Fprintf(r.writer, "Scan Time: %s\n", data.Timestamp.Format("2006-01-02 15:04:05"))
 	if data.Config.AWSProfile != "" {
