@@ -5,6 +5,32 @@ All notable changes to S3Spectre will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.2.0] - 2026-02-22
+
+### Added
+
+- SARIF output format (`--format sarif`) for GitHub Security tab integration (WO-S04)
+- Structured logging via `log/slog` with `--verbose` flag (WO-S02)
+- Config file support: `.s3spectre.yaml` in CWD or home directory (WO-S05)
+- `--timeout` flag for total operation timeout on scan and discover commands (WO-S03)
+- Baseline diff mode: `--baseline` and `--update-baseline` flags for suppressing known findings (WO-S06)
+- Connection banner showing AWS region and profile on scan start (WO-S11)
+- "No issues detected" message when scan finds no problems (WO-S11)
+- Version injection via LDFLAGS (version, commit, date in `s3spectre version` output)
+- GoReleaser v2 config for multi-platform releases (WO-S07)
+- Docker images via multi-stage distroless build, multi-arch manifests on ghcr.io (WO-S08)
+- Homebrew formula via GoReleaser brews section (WO-S09)
+- Version displayed in text report headers
+
+### Changed
+
+- Release workflow switched from manual builds to GoReleaser
+- CI lint job now includes `go vet` step
+- Makefile aligned with spectre family conventions (LDFLAGS, vet, deps, coverage targets)
+- Test coverage improved: analyzer 98.8%, scanner 87.1%, report 79%, logging 100%
+
 ## [0.1.0] - 2026-02-07
 
 ### Added
@@ -20,3 +46,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Unused bucket detection with multi-factor scoring (code references, emptiness, deprecated tags)
 - Automatic retry with exponential backoff for transient S3 API errors
 - Enhanced error messages with actionable suggestions for common AWS failures (credentials, permissions, rate limiting)
+
+[Unreleased]: https://github.com/ppiankov/s3spectre/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/ppiankov/s3spectre/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/ppiankov/s3spectre/releases/tag/v0.1.0

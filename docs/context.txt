@@ -1,0 +1,42 @@
+s3spectre context snapshot — 2026-02-22
+
+## Current state
+
+Version: 0.2.0 (unreleased, all commits on main)
+Last tag: v0.1.4
+All Phase 2 WOs complete. Phase 3 distribution done (GoReleaser, Docker, Homebrew).
+
+## Completed work orders
+
+WO-S01: Test coverage push (partial — ~50% overall, analyzer 98.8%, scanner 87.1%)
+WO-S02: Structured logging via slog
+WO-S03: Connection resilience (--timeout flag, context propagation)
+WO-S04: SARIF output (--format sarif)
+WO-S05: Config file (.s3spectre.yaml in CWD/home)
+WO-S06: Baseline diff mode (--baseline, --update-baseline)
+WO-S07: GoReleaser v2 config
+WO-S08: Docker image (distroless, multi-arch)
+WO-S09: Homebrew formula (GoReleaser brews → homebrew-tap)
+WO-S11: First-run UX (connection banner, no-findings message)
+WO-S12: Standardized output header (tool/version/timestamp in JSON)
+
+## Architecture (8 internal packages)
+
+commands, scanner, s3, analyzer, report, logging, config, baseline
+cmd/s3spectre/main.go — minimal, LDFLAGS version injection
+
+## Key decisions
+
+- Version injected via LDFLAGS: main.version, main.commit, main.date
+- Config file uses gopkg.in/yaml.v3, searches CWD then home
+- Baseline flattens nested bucket+prefix structure for diff comparison
+- Timeout wraps entire operation context, not individual API calls
+- 403 errors fail fast (not in retryable list), 429/5xx retry with backoff
+- GoReleaser handles Homebrew via brews section (no separate formula management)
+- Docker images: distroless/static-debian12:nonroot, published to ghcr.io
+
+## Open items
+
+- WO-S10 (GitHub Action) — separate repo concern, not started
+- Test coverage could be higher in commands (29.3%) and s3 (35.4%)
+- go.mod says go 1.21, CI/Dockerfile use 1.21 — may need updating
