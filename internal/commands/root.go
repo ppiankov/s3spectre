@@ -1,6 +1,9 @@
 package commands
 
 import (
+	"log/slog"
+
+	"github.com/ppiankov/s3spectre/internal/config"
 	"github.com/ppiankov/s3spectre/internal/logging"
 	"github.com/spf13/cobra"
 )
@@ -10,6 +13,7 @@ var (
 	version string
 	commit  string
 	date    string
+	cfg     config.Config
 )
 
 var rootCmd = &cobra.Command{
@@ -22,6 +26,12 @@ buckets, unused buckets, stale prefixes, and lifecycle misconfigurations.
 Part of the Spectre family of infrastructure cleanup tools.`,
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		logging.Init(verbose)
+		loaded, err := config.Load(".")
+		if err != nil {
+			slog.Warn("Failed to load config file", "error", err)
+		} else {
+			cfg = loaded
+		}
 	},
 }
 

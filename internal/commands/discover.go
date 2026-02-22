@@ -30,6 +30,7 @@ var discoverFlags struct {
 	failOnUnused     bool
 	failOnRisky      bool
 	noProgress       bool
+	timeout          time.Duration
 }
 
 var discoverCmd = &cobra.Command{
@@ -55,10 +56,19 @@ func init() {
 	discoverCmd.Flags().BoolVar(&discoverFlags.failOnUnused, "fail-on-unused", false, "Exit with error if unused buckets found")
 	discoverCmd.Flags().BoolVar(&discoverFlags.failOnRisky, "fail-on-risky", false, "Exit with error if risky buckets found")
 	discoverCmd.Flags().BoolVar(&discoverFlags.noProgress, "no-progress", false, "Disable progress indicators")
+	discoverCmd.Flags().DurationVar(&discoverFlags.timeout, "timeout", 0, "Total operation timeout (e.g. 5m, 30s). 0 means no timeout")
 }
 
 func runDiscover(cmd *cobra.Command, args []string) error {
+	// Apply config file defaults for flags not explicitly set
+	applyConfigToDiscoverFlags(cmd)
+
 	ctx := context.Background()
+	if discoverFlags.timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, discoverFlags.timeout)
+		defer cancel()
+	}
 	start := time.Now()
 
 	// Check if we're running in a terminal
@@ -179,4 +189,18 @@ func runDiscover(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+func applyConfigToDiscoverFlags(cmd *cobra.Command) {
+	if !cmd.Flags().Lookup("aws-region").Changed && cfg.Region != "" {
+		discoverFlags.awsRegion = cfg.Region
+	}
+	if !cmd.Flags().Lookup("format").Changed && cfg.Format != "" {
+		discoverFlags.outputFormat = cfg.Format
+	}
+	if !cmd.Flags().Lookup("timeout").Changed {
+		if d := cfg.TimeoutDuration(); d > 0 {
+			discoverFlags.timeout = d
+		}
+	}
 }
