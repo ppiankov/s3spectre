@@ -33,18 +33,35 @@ Infrastructure drift is not a detection problem. It is a structural problem. By 
 
 The tool presents evidence and lets humans decide. It does not auto-remediate, does not guess intent, and does not assign confidence scores where deterministic checks suffice.
 
+## Installation
+
+```bash
+# Homebrew
+brew install ppiankov/tap/s3spectre
+
+# Docker
+docker pull ghcr.io/ppiankov/s3spectre:latest
+
+# From source
+git clone https://github.com/ppiankov/s3spectre.git
+cd s3spectre && make build
+```
+
 ## Quick start
 
 ```bash
-git clone https://github.com/ppiankov/s3spectre.git
-cd s3spectre
-make build
-
 # Scan mode: correlate code references against AWS
-./bin/s3spectre scan --repo .
+s3spectre scan --repo .
 
 # Discover mode: audit all buckets in your AWS account
-./bin/s3spectre discover
+s3spectre discover
+
+# SARIF output for GitHub Security tab
+s3spectre scan --repo . --format sarif --output results.sarif
+
+# Baseline: suppress known findings on repeat runs
+s3spectre scan --repo . --format json --output baseline.json --update-baseline
+s3spectre scan --repo . --baseline baseline.json
 ```
 
 Requires valid AWS credentials (environment, profile, or IAM role).
