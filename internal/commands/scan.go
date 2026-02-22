@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ppiankov/s3spectre/internal/analyzer"
+	"github.com/ppiankov/s3spectre/internal/baseline"
 	"github.com/ppiankov/s3spectre/internal/report"
 	"github.com/ppiankov/s3spectre/internal/s3"
 	"github.com/ppiankov/s3spectre/internal/scanner"
@@ -35,6 +37,8 @@ var scanFlags struct {
 	includeReferences   bool
 	noProgress          bool
 	timeout             time.Duration
+	baselinePath        string
+	updateBaseline      bool
 }
 
 var scanCmd = &cobra.Command{
@@ -65,6 +69,8 @@ func init() {
 	scanCmd.Flags().BoolVar(&scanFlags.includeReferences, "include-references", false, "Include detailed reference list in output")
 	scanCmd.Flags().BoolVar(&scanFlags.noProgress, "no-progress", false, "Disable progress indicators")
 	scanCmd.Flags().DurationVar(&scanFlags.timeout, "timeout", 0, "Total operation timeout (e.g. 5m, 30s). 0 means no timeout")
+	scanCmd.Flags().StringVar(&scanFlags.baselinePath, "baseline", "", "Path to previous JSON report for diff comparison")
+	scanCmd.Flags().BoolVar(&scanFlags.updateBaseline, "update-baseline", false, "Write current results as the new baseline")
 }
 
 func runScan(cmd *cobra.Command, args []string) error {
@@ -187,6 +193,33 @@ func runScan(cmd *cobra.Command, args []string) error {
 
 	if err := reporter.Generate(reportData); err != nil {
 		return enhanceError("report generation", err, scanFlags.maxConcurrency)
+	}
+
+	// Baseline comparison
+	if scanFlags.baselinePath != "" {
+		currentFindings := baseline.FlattenScanFindings(reportData)
+		baselineFindings, err := baseline.LoadScanBaseline(scanFlags.baselinePath)
+		if err != nil {
+			return enhanceError("baseline load", err, scanFlags.maxConcurrency)
+		}
+		diff := baseline.Diff(currentFindings, baselineFindings)
+		slog.Info("Baseline comparison",
+			slog.Int("new", len(diff.New)),
+			slog.Int("resolved", len(diff.Resolved)),
+			slog.Int("unchanged", len(diff.Unchanged)),
+		)
+	}
+
+	// Write updated baseline if requested
+	if scanFlags.updateBaseline && scanFlags.outputFile != "" {
+		baselineData, err := json.MarshalIndent(reportData, "", "  ")
+		if err != nil {
+			return enhanceError("baseline write", err, scanFlags.maxConcurrency)
+		}
+		if err := os.WriteFile(scanFlags.outputFile, baselineData, 0644); err != nil {
+			return enhanceError("baseline write", err, scanFlags.maxConcurrency)
+		}
+		slog.Info("Updated baseline", slog.String("path", scanFlags.outputFile))
 	}
 
 	prefixCount := 0
