@@ -1,0 +1,4 @@
+FROM gcr.io/distroless/static-debian12:nonroot
+COPY s3spectre /usr/local/bin/s3spectre
+USER nonroot:nonroot
+ENTRYPOINT ["s3spectre"]
