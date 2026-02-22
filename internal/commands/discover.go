@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ppiankov/s3spectre/internal/analyzer"
+	"github.com/ppiankov/s3spectre/internal/baseline"
 	"github.com/ppiankov/s3spectre/internal/report"
 	"github.com/ppiankov/s3spectre/internal/s3"
 	"github.com/spf13/cobra"
@@ -31,6 +33,8 @@ var discoverFlags struct {
 	failOnRisky      bool
 	noProgress       bool
 	timeout          time.Duration
+	baselinePath     string
+	updateBaseline   bool
 }
 
 var discoverCmd = &cobra.Command{
@@ -57,6 +61,8 @@ func init() {
 	discoverCmd.Flags().BoolVar(&discoverFlags.failOnRisky, "fail-on-risky", false, "Exit with error if risky buckets found")
 	discoverCmd.Flags().BoolVar(&discoverFlags.noProgress, "no-progress", false, "Disable progress indicators")
 	discoverCmd.Flags().DurationVar(&discoverFlags.timeout, "timeout", 0, "Total operation timeout (e.g. 5m, 30s). 0 means no timeout")
+	discoverCmd.Flags().StringVar(&discoverFlags.baselinePath, "baseline", "", "Path to previous JSON report for diff comparison")
+	discoverCmd.Flags().BoolVar(&discoverFlags.updateBaseline, "update-baseline", false, "Write current results as the new baseline")
 }
 
 func runDiscover(cmd *cobra.Command, args []string) error {
@@ -167,6 +173,33 @@ func runDiscover(cmd *cobra.Command, args []string) error {
 
 	if err := reporter.GenerateDiscovery(reportData); err != nil {
 		return enhanceError("report generation", err, discoverFlags.maxConcurrency)
+	}
+
+	// Baseline comparison
+	if discoverFlags.baselinePath != "" {
+		currentFindings := baseline.FlattenDiscoveryFindings(reportData)
+		baselineFindings, err := baseline.LoadDiscoveryBaseline(discoverFlags.baselinePath)
+		if err != nil {
+			return enhanceError("baseline load", err, discoverFlags.maxConcurrency)
+		}
+		diff := baseline.Diff(currentFindings, baselineFindings)
+		slog.Info("Baseline comparison",
+			slog.Int("new", len(diff.New)),
+			slog.Int("resolved", len(diff.Resolved)),
+			slog.Int("unchanged", len(diff.Unchanged)),
+		)
+	}
+
+	// Write updated baseline if requested
+	if discoverFlags.updateBaseline && discoverFlags.outputFile != "" {
+		baselineData, err := json.MarshalIndent(reportData, "", "  ")
+		if err != nil {
+			return enhanceError("baseline write", err, discoverFlags.maxConcurrency)
+		}
+		if err := os.WriteFile(discoverFlags.outputFile, baselineData, 0644); err != nil {
+			return enhanceError("baseline write", err, discoverFlags.maxConcurrency)
+		}
+		slog.Info("Updated baseline", slog.String("path", discoverFlags.outputFile))
 	}
 
 	findingCount := len(results.Summary.UnusedBuckets) +
