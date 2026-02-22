@@ -104,6 +104,10 @@ func runScan(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return enhanceError("S3 client initialization", err, scanFlags.maxConcurrency)
 	}
+	slog.Info("Connected to AWS",
+		slog.String("region", s3Client.GetRegion()),
+		slog.String("profile", scanFlags.awsProfile),
+	)
 
 	// 3. Configure inspector
 	inspector := s3.NewInspector(s3Client, scanFlags.maxConcurrency)
@@ -246,6 +250,9 @@ func runScan(cmd *cobra.Command, args []string) error {
 		slog.Int("finding_count", findingCount),
 		slog.Duration("duration", time.Since(start)),
 	)
+	if findingCount == 0 {
+		fmt.Fprintf(os.Stderr, "No issues detected. %d buckets scanned.\n", analysis.Summary.TotalBuckets)
+	}
 
 	// Check exit conditions
 	if scanFlags.failOnMissing && len(analysis.Summary.MissingBuckets) > 0 {

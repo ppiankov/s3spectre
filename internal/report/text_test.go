@@ -42,7 +42,7 @@ func TestTextReporter_EmptyInput(t *testing.T) {
 	}
 
 	out := buf.String()
-	if !strings.Contains(out, "S3Spectre Report") {
+	if !strings.Contains(out, "S3Spectre") {
 		t.Fatalf("expected report header, got: %s", out)
 	}
 	if !strings.Contains(out, "Summary") {
@@ -123,7 +123,7 @@ func TestTextReporter_OutputFormat(t *testing.T) {
 
 	out := buf.String()
 	checks := []string{
-		"S3Spectre Report",
+		"S3Spectre",
 		"Repository: /repo",
 		"AWS Profile: default",
 		"AWS Region: us-east-1",
