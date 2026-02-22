@@ -1,8 +1,13 @@
-.PHONY: build test clean install fmt lint help
+.PHONY: build test clean install fmt lint vet deps coverage help
 
-BINARY_NAME=s3spectre
-BUILD_DIR=./bin
-MAIN_PATH=./cmd/s3spectre
+BINARY_NAME := s3spectre
+BUILD_DIR   := ./bin
+MAIN_PATH   := ./cmd/s3spectre
+VERSION     ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+VERSION_NUM  = $(patsubst v%,%,$(VERSION))
+COMMIT      ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
+DATE        ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+LDFLAGS     := -s -w -X main.version=$(VERSION_NUM) -X main.commit=$(COMMIT) -X main.date=$(DATE)
 
 ## help: Display this help message
 help:
@@ -11,44 +16,42 @@ help:
 
 ## build: Build the binary
 build:
-	@echo "Building $(BINARY_NAME)..."
 	@mkdir -p $(BUILD_DIR)
-	@go build -o $(BUILD_DIR)/$(BINARY_NAME) $(MAIN_PATH)
-	@echo "Binary built: $(BUILD_DIR)/$(BINARY_NAME)"
+	go build -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME) $(MAIN_PATH)
 
-## test: Run tests
+## test: Run tests with race detection
 test:
-	@echo "Running tests..."
-	@go test -race -v ./...
+	go test -race ./...
 
-## clean: Remove build artifacts
-clean:
-	@echo "Cleaning..."
-	@rm -rf $(BUILD_DIR)
-	@go clean
+## vet: Run go vet
+vet:
+	go vet ./...
 
-## install: Install the binary to GOPATH
-install:
-	@echo "Installing $(BINARY_NAME)..."
-	@go install $(MAIN_PATH)
+## lint: Run golangci-lint
+lint:
+	golangci-lint run --timeout=5m
 
 ## fmt: Format code
 fmt:
-	@echo "Formatting code..."
-	@go fmt ./...
+	gofmt -w .
+	@command -v goimports >/dev/null 2>&1 && goimports -w . || true
 
-## lint: Run linter
-lint:
-	@echo "Running linter..."
-	@golangci-lint run || echo "golangci-lint not installed, skipping..."
+## clean: Remove build artifacts
+clean:
+	rm -rf $(BUILD_DIR) dist/
 
-## run: Build and run
-run: build
-	@$(BUILD_DIR)/$(BINARY_NAME)
+## install: Install the binary to GOPATH
+install:
+	go install -ldflags="$(LDFLAGS)" $(MAIN_PATH)
 
-## tidy: Tidy dependencies
-tidy:
-	@echo "Tidying dependencies..."
-	@go mod tidy
+## deps: Download and tidy dependencies
+deps:
+	go mod download
+	go mod tidy
+
+## coverage: Run tests with coverage report
+coverage:
+	go test -race -coverprofile=coverage.out ./...
+	go tool cover -func=coverage.out
 
 .DEFAULT_GOAL := help

@@ -6,17 +6,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var version = "0.1.0"
-
 var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print version information",
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Printf("s3spectre version %s\n", version)
+		fmt.Printf("s3spectre %s (commit: %s, built: %s)\n", version, commit, date)
 	},
-}
-
-// GetVersion returns the current version
-func GetVersion() string {
-	return version
 }
