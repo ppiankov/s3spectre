@@ -66,9 +66,11 @@ func selectReporter(format string, writer io.Writer) (report.Reporter, error) {
 		return report.NewJSONReporter(writer), nil
 	case "sarif":
 		return report.NewSARIFReporter(writer), nil
+	case "spectrehub":
+		return report.NewSpectreHubReporter(writer), nil
 	case "text":
 		return report.NewTextReporter(writer), nil
 	default:
-		return nil, fmt.Errorf("unsupported output format: %s (supported: text, json, sarif)", format)
+		return nil, fmt.Errorf("unsupported output format: %s (supported: text, json, sarif, spectrehub)", format)
 	}
 }
