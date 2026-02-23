@@ -60,7 +60,7 @@ func init() {
 	scanCmd.Flags().IntVar(&scanFlags.unusedThresholdDays, "unused-threshold-days", 180, "Days threshold for unused bucket detection")
 	scanCmd.Flags().BoolVar(&scanFlags.checkUnused, "check-unused", false, "Enable unused bucket detection")
 	scanCmd.Flags().IntVar(&scanFlags.maxConcurrency, "concurrency", 10, "Max concurrent S3 API calls")
-	scanCmd.Flags().StringVarP(&scanFlags.outputFormat, "format", "f", "text", "Output format: text, json, or sarif")
+	scanCmd.Flags().StringVarP(&scanFlags.outputFormat, "format", "f", "text", "Output format: text, json, sarif, or spectrehub")
 	scanCmd.Flags().StringVarP(&scanFlags.outputFile, "output", "o", "", "Output file (default: stdout)")
 	scanCmd.Flags().BoolVar(&scanFlags.failOnMissing, "fail-on-missing", false, "Exit with error if missing buckets found")
 	scanCmd.Flags().BoolVar(&scanFlags.failOnStale, "fail-on-stale", false, "Exit with error if stale prefixes found")
