@@ -21,6 +21,7 @@ go install github.com/ppiankov/s3spectre/cmd/s3spectre@latest
 Scans S3 buckets for security findings.
 
 **Flags:**
+- `--format json` — output as JSON (ANCC standard, alias for --output json)
 - `--output json` — output as JSON (spectre/v1 envelope)
 - `--output sarif` — SARIF format for CI integration
 - `--output spectrehub` — SpectreHub aggregator format
