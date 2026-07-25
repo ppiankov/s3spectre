@@ -207,3 +207,83 @@ func TestTextReporter_LargeDiscoveryOutput(t *testing.T) {
 		t.Fatalf("expected version overhead details, got: %s", out)
 	}
 }
+
+// TestTextReporter_CategoryOrderBySeverity guards against categories printing
+// in a fixed order that doesn't track severity (e.g. low-severity Stale
+// Prefixes appearing ahead of medium-severity categories).
+func TestTextReporter_CategoryOrderBySeverity(t *testing.T) {
+	setNoColor(t)
+	var buf bytes.Buffer
+	reporter := NewTextReporter(&buf)
+
+	summary := analyzer.Summary{
+		TotalBuckets:       2,
+		StalePrefixes:      []string{"bucket/stale-prefix"},
+		LifecycleMisconfig: []string{"lifecycle-bucket"},
+	}
+	buckets := map[string]*analyzer.BucketAnalysis{
+		"lifecycle-bucket": {Name: "lifecycle-bucket", Status: analyzer.StatusLifecycleMisconfig},
+	}
+
+	data := Data{
+		Tool:    "s3spectre",
+		Version: "0.1.0",
+		Config:  Config{RepoPath: "/repo"},
+		Summary: summary,
+		Buckets: buckets,
+	}
+
+	if err := reporter.Generate(data); err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+
+	out := buf.String()
+	// Use the finding markers, not the section headings, since "Stale Prefixes"
+	// also appears (identically) in the summary block above the findings.
+	lifecycleIdx := strings.Index(out, "[LIFECYCLE_MISCONFIG]")
+	staleIdx := strings.Index(out, "[STALE_PREFIX]")
+	if lifecycleIdx == -1 || staleIdx == -1 {
+		t.Fatalf("expected both sections present, got: %s", out)
+	}
+	if lifecycleIdx > staleIdx {
+		t.Fatalf("expected medium-severity Lifecycle Misconfigurations before low-severity Stale Prefixes, got: %s", out)
+	}
+}
+
+// TestTextReporter_RiskyBucketsSortedByRiskScore guards against RiskyBuckets
+// rendering in alphabetical order instead of risk-score-descending, which
+// would bury the most dangerous bucket among lower-risk noise.
+func TestTextReporter_RiskyBucketsSortedByRiskScore(t *testing.T) {
+	setNoColor(t)
+	var buf bytes.Buffer
+	reporter := NewTextReporter(&buf)
+
+	buckets := map[string]*analyzer.BucketDiscovery{
+		"aaa-low-risk":  {Name: "aaa-low-risk", Status: analyzer.StatusRisky, RiskScore: 40},
+		"zzz-high-risk": {Name: "zzz-high-risk", Status: analyzer.StatusRisky, RiskScore: 95},
+	}
+
+	data := DiscoveryData{
+		Tool:    "s3spectre",
+		Version: "0.1.0",
+		Summary: analyzer.DiscoverySummary{
+			TotalBuckets: 2,
+			RiskyBuckets: []string{"aaa-low-risk", "zzz-high-risk"},
+		},
+		Buckets: buckets,
+	}
+
+	if err := reporter.GenerateDiscovery(data); err != nil {
+		t.Fatalf("GenerateDiscovery failed: %v", err)
+	}
+
+	out := buf.String()
+	highIdx := strings.Index(out, "zzz-high-risk")
+	lowIdx := strings.Index(out, "aaa-low-risk")
+	if highIdx == -1 || lowIdx == -1 {
+		t.Fatalf("expected both buckets present, got: %s", out)
+	}
+	if highIdx > lowIdx {
+		t.Fatalf("expected higher risk-score bucket (95) before lower (40) despite alphabetical order, got: %s", out)
+	}
+}

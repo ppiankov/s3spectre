@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/ppiankov/s3spectre/internal/analyzer"
@@ -96,6 +95,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return enhanceError("repository scan", err, scanFlags.maxConcurrency)
 	}
+	references = filterExcludedReferences(references, cfg.ExcludeBuckets, cfg.ExcludePrefixes)
 	printStatus("Found %d S3 references in code", len(references))
 
 	// 2. Initialize S3 client
@@ -113,22 +113,8 @@ func runScan(cmd *cobra.Command, args []string) error {
 	inspector := s3.NewInspector(s3Client, scanFlags.maxConcurrency)
 
 	// Set up regions
-	if len(scanFlags.regions) > 0 {
-		// Specific regions provided
-		inspector.SetRegions(scanFlags.regions)
-		printStatus("Scanning regions: %s", strings.Join(scanFlags.regions, ", "))
-	} else if scanFlags.allRegions {
-		// Scan all regions
-		inspector.SetAllRegions(true)
-		printStatus("Scanning all enabled AWS regions")
-	} else {
-		// Single region (default)
-		region := scanFlags.awsRegion
-		if region == "" {
-			region = s3Client.GetRegion()
-		}
-		printStatus("Scanning region: %s", region)
-	}
+	configureInspectorRegions(inspector, s3Client, scanFlags.regions, scanFlags.allRegions, scanFlags.awsRegion,
+		"Scanning regions: %s", "Scanning all enabled AWS regions", "Scanning region: %s")
 
 	// Set up progress callback
 	if showProgress {
@@ -272,18 +258,8 @@ func runScan(cmd *cobra.Command, args []string) error {
 }
 
 func applyConfigToScanFlags(cmd *cobra.Command) {
-	if !cmd.Flags().Lookup("aws-region").Changed && cfg.Region != "" {
-		scanFlags.awsRegion = cfg.Region
-	}
+	applyCommonConfigDefaults(cmd, &scanFlags.awsRegion, &scanFlags.outputFormat, &scanFlags.timeout)
 	if !cmd.Flags().Lookup("stale-days").Changed && cfg.StaleDays > 0 {
 		scanFlags.staleThresholdDays = cfg.StaleDays
-	}
-	if !cmd.Flags().Lookup("format").Changed && cfg.Format != "" {
-		scanFlags.outputFormat = cfg.Format
-	}
-	if !cmd.Flags().Lookup("timeout").Changed {
-		if d := cfg.TimeoutDuration(); d > 0 {
-			scanFlags.timeout = d
-		}
 	}
 }

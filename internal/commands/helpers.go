@@ -5,8 +5,12 @@ import (
 	"io"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/ppiankov/s3spectre/internal/report"
+	"github.com/ppiankov/s3spectre/internal/s3"
+	"github.com/ppiankov/s3spectre/internal/scanner"
+	"github.com/spf13/cobra"
 )
 
 func printStatus(format string, args ...interface{}) {
@@ -58,6 +62,91 @@ func enhanceError(operation string, err error, concurrency int) error {
 
 	// Default error with context
 	return fmt.Errorf("%s failed: %w", operation, err)
+}
+
+// isExcludedBucket reports whether name matches an exact entry in excludeBuckets
+// or is prefixed by any entry in excludePrefixes.
+func isExcludedBucket(name string, excludeBuckets, excludePrefixes []string) bool {
+	for _, b := range excludeBuckets {
+		if name == b {
+			return true
+		}
+	}
+	for _, p := range excludePrefixes {
+		if p != "" && strings.HasPrefix(name, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// filterExcludedReferences drops scan references whose bucket matches the config
+// exclude lists.
+func filterExcludedReferences(refs []scanner.Reference, excludeBuckets, excludePrefixes []string) []scanner.Reference {
+	if len(excludeBuckets) == 0 && len(excludePrefixes) == 0 {
+		return refs
+	}
+	filtered := make([]scanner.Reference, 0, len(refs))
+	for _, ref := range refs {
+		if isExcludedBucket(ref.Bucket, excludeBuckets, excludePrefixes) {
+			continue
+		}
+		filtered = append(filtered, ref)
+	}
+	return filtered
+}
+
+// filterExcludedBuckets drops discovered buckets matching the config exclude lists.
+func filterExcludedBuckets(buckets map[string]*s3.BucketInfo, excludeBuckets, excludePrefixes []string) map[string]*s3.BucketInfo {
+	if len(excludeBuckets) == 0 && len(excludePrefixes) == 0 {
+		return buckets
+	}
+	filtered := make(map[string]*s3.BucketInfo, len(buckets))
+	for name, b := range buckets {
+		if isExcludedBucket(name, excludeBuckets, excludePrefixes) {
+			continue
+		}
+		filtered[name] = b
+	}
+	return filtered
+}
+
+// applyCommonConfigDefaults applies config file defaults for the aws-region,
+// format, and timeout flags when the user did not explicitly set them on the
+// command line. Shared by scan and discover, which otherwise duplicate this
+// logic verbatim.
+func applyCommonConfigDefaults(cmd *cobra.Command, region, format *string, timeout *time.Duration) {
+	if !cmd.Flags().Lookup("aws-region").Changed && cfg.Region != "" {
+		*region = cfg.Region
+	}
+	if !cmd.Flags().Lookup("format").Changed && cfg.Format != "" {
+		*format = cfg.Format
+	}
+	if !cmd.Flags().Lookup("timeout").Changed {
+		if d := cfg.TimeoutDuration(); d > 0 {
+			*timeout = d
+		}
+	}
+}
+
+// configureInspectorRegions sets the inspector's region scope from flags and
+// prints a status message, using the given message templates so scan and
+// discover can each keep their own wording. Shared to avoid the two commands
+// drifting on the underlying region-selection logic.
+func configureInspectorRegions(inspector *s3.Inspector, s3Client *s3.Client, regions []string, allRegions bool, awsRegion string, multiMsg, allMsg, singleMsg string) {
+	if len(regions) > 0 {
+		inspector.SetRegions(regions)
+		printStatus(multiMsg, strings.Join(regions, ", "))
+	} else if allRegions {
+		inspector.SetAllRegions(true)
+		printStatus(allMsg)
+	} else {
+		region := awsRegion
+		if region == "" {
+			region = s3Client.GetRegion()
+		}
+		printStatus(singleMsg, region)
+	}
 }
 
 func selectReporter(format string, writer io.Writer) (report.Reporter, error) {

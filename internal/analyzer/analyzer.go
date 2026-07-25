@@ -2,7 +2,6 @@ package analyzer
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/ppiankov/s3spectre/internal/s3"
 	"github.com/ppiankov/s3spectre/internal/scanner"
@@ -74,8 +73,14 @@ func analyzeBucket(bucket string, info *s3.BucketInfo, refs []scanner.Reference,
 		return analysis
 	}
 
-	// Check for unused bucket if enabled
-	if config.CheckUnused {
+	managed := IsServiceManagedBucket(bucket)
+
+	// Check for unused bucket if enabled. Service-managed buckets (CloudTrail,
+	// AWS Config, ELB logs, etc.) are excluded from the UNUSED signal only:
+	// they look unused by generic heuristics but are required by another AWS
+	// service. Version sprawl and lifecycle-misconfig checks below still run
+	// for managed buckets, since those are independent, legitimate findings.
+	if config.CheckUnused && !managed {
 		unusedScore := calculateUnusedScore(bucket, info, referencedBuckets, config)
 		analysis.UnusedScore = unusedScore
 
@@ -120,7 +125,11 @@ func analyzeBucket(bucket string, info *s3.BucketInfo, refs []scanner.Reference,
 	// Default to OK if no issues found
 	if analysis.Status == "" {
 		analysis.Status = StatusOK
-		analysis.Message = "Bucket exists and matches expected usage"
+		if managed {
+			analysis.Message = managedBucketMessage
+		} else {
+			analysis.Message = "Bucket exists and matches expected usage"
+		}
 	}
 
 	return analysis
@@ -157,23 +166,10 @@ func calculateUnusedScore(bucket string, info *s3.BucketInfo, referencedBuckets 
 	// For now, we'll skip this since we don't have creation date
 
 	// Score: Has deprecated/old tags (20 points)
-	if info.Tags != nil {
-		deprecatedTags := []string{"deprecated", "old", "unused", "delete", "obsolete", "legacy"}
-		for key, value := range info.Tags {
-			keyLower := strings.ToLower(key)
-			valueLower := strings.ToLower(value)
-			for _, deprecated := range deprecatedTags {
-				if keyLower == deprecated || valueLower == deprecated {
-					score.DeprecatedTag = 20
-					score.Total += 20
-					score.Reasons = append(score.Reasons, fmt.Sprintf("Has deprecated tag: %s=%s", key, value))
-					break
-				}
-			}
-			if score.DeprecatedTag > 0 {
-				break
-			}
-		}
+	if isDeprecated, key, value := IsDeprecatedTag(info.Tags); isDeprecated {
+		score.DeprecatedTag = 20
+		score.Total += 20
+		score.Reasons = append(score.Reasons, fmt.Sprintf("Has deprecated tag: %s=%s", key, value))
 	}
 
 	// Determine if unused

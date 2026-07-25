@@ -2,7 +2,6 @@ package analyzer
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/ppiankov/s3spectre/internal/s3"
 )
@@ -94,15 +93,23 @@ func analyzeBucketDiscovery(info *s3.BucketInfo, config DiscoveryConfig) *Bucket
 		BucketInfo:      info,
 	}
 
+	// Service-managed buckets (CloudTrail, AWS Config, ELB logs, etc.) are
+	// excluded from the age/inactivity/empty UNUSED signal only: those
+	// heuristics assume neglect, but a managed bucket can legitimately be
+	// young, quiet, or transiently empty. Version sprawl, encryption, and
+	// public-access checks below still run for managed buckets, since those
+	// are independent, legitimate findings unrelated to "is this unused".
+	managed := IsServiceManagedBucket(info.Name)
+
 	// Factor 1: Age (20 points if older than threshold)
-	if info.AgeInDays > config.AgeThresholdDays && config.AgeThresholdDays > 0 {
+	if !managed && info.AgeInDays > config.AgeThresholdDays && config.AgeThresholdDays > 0 {
 		discovery.RiskScore += 20
 		discovery.RiskFactors = append(discovery.RiskFactors,
 			fmt.Sprintf("Old bucket (%d days)", info.AgeInDays))
 	}
 
 	// Factor 2: Inactivity (50 points if no activity)
-	if info.DaysSinceActivity > config.InactivityThresholdDays && config.InactivityThresholdDays > 0 {
+	if !managed && info.DaysSinceActivity > config.InactivityThresholdDays && config.InactivityThresholdDays > 0 {
 		discovery.RiskScore += 50
 		discovery.RiskFactors = append(discovery.RiskFactors,
 			fmt.Sprintf("No activity for %d days", info.DaysSinceActivity))
@@ -111,7 +118,7 @@ func analyzeBucketDiscovery(info *s3.BucketInfo, config DiscoveryConfig) *Bucket
 	}
 
 	// Factor 3: Empty bucket (30 points)
-	if info.IsEmpty {
+	if !managed && info.IsEmpty {
 		discovery.RiskScore += 30
 		discovery.RiskFactors = append(discovery.RiskFactors, "Empty bucket")
 		discovery.Recommendations = append(discovery.Recommendations,
@@ -119,7 +126,7 @@ func analyzeBucketDiscovery(info *s3.BucketInfo, config DiscoveryConfig) *Bucket
 	}
 
 	// Factor 4: Deprecated tags (20 points)
-	if hasDeprecatedTags(info.Tags) {
+	if isDeprecated, _, _ := IsDeprecatedTag(info.Tags); isDeprecated {
 		discovery.RiskScore += 20
 		discovery.RiskFactors = append(discovery.RiskFactors, "Has deprecated tags")
 		discovery.Recommendations = append(discovery.Recommendations,
@@ -158,41 +165,28 @@ func analyzeBucketDiscovery(info *s3.BucketInfo, config DiscoveryConfig) *Bucket
 	}
 
 	if discovery.RiskScore >= threshold {
-		// Determine specific status
-		if info.IsEmpty && (info.DaysSinceActivity > config.InactivityThresholdDays || info.DaysSinceActivity == 0) {
+		// Determine specific status. Managed buckets never land on the
+		// "delete it" categories (Unused/Inactive) driven by the
+		// age/inactivity/empty signal, since that signal was never scored for
+		// them; they can still land on VersionSprawl or the generic Risky
+		// bucket for real independent findings (e.g. public access).
+		switch {
+		case !managed && info.IsEmpty && (info.DaysSinceActivity > config.InactivityThresholdDays || info.DaysSinceActivity == 0):
 			discovery.Status = StatusUnusedBucket
-		} else if info.VersioningEnabled && info.LifecycleRules == 0 {
+		case info.VersioningEnabled && info.LifecycleRules == 0:
 			discovery.Status = StatusVersionSprawl
-		} else if info.DaysSinceActivity > config.InactivityThresholdDays {
+		case !managed && info.DaysSinceActivity > config.InactivityThresholdDays:
 			discovery.Status = StatusInactive
-		} else {
+		default:
 			discovery.Status = StatusRisky
 		}
 	} else {
 		discovery.Status = StatusOK
 	}
 
+	if managed {
+		discovery.Recommendations = append([]string{managedBucketMessage}, discovery.Recommendations...)
+	}
+
 	return discovery
-}
-
-// hasDeprecatedTags checks if bucket has deprecated tags
-func hasDeprecatedTags(tags map[string]string) bool {
-	if tags == nil {
-		return false
-	}
-
-	deprecatedTags := []string{"deprecated", "old", "unused", "delete", "obsolete", "legacy", "retired"}
-
-	for key, value := range tags {
-		keyLower := strings.ToLower(key)
-		valueLower := strings.ToLower(value)
-
-		for _, deprecated := range deprecatedTags {
-			if keyLower == deprecated || valueLower == deprecated {
-				return true
-			}
-		}
-	}
-
-	return false
 }

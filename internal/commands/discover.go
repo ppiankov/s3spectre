@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/ppiankov/s3spectre/internal/analyzer"
@@ -96,19 +95,8 @@ func runDiscover(cmd *cobra.Command, args []string) error {
 	inspector := s3.NewInspector(s3Client, discoverFlags.maxConcurrency)
 
 	// Set up regions
-	if len(discoverFlags.regions) > 0 {
-		inspector.SetRegions(discoverFlags.regions)
-		printStatus("Discovering buckets in regions: %s", strings.Join(discoverFlags.regions, ", "))
-	} else if discoverFlags.allRegions {
-		inspector.SetAllRegions(true)
-		printStatus("Discovering buckets across all enabled AWS regions")
-	} else {
-		region := discoverFlags.awsRegion
-		if region == "" {
-			region = s3Client.GetRegion()
-		}
-		printStatus("Discovering buckets in region: %s", region)
-	}
+	configureInspectorRegions(inspector, s3Client, discoverFlags.regions, discoverFlags.allRegions, discoverFlags.awsRegion,
+		"Discovering buckets in regions: %s", "Discovering buckets across all enabled AWS regions", "Discovering buckets in region: %s")
 
 	// Set up progress callback
 	if showProgress {
@@ -127,6 +115,7 @@ func runDiscover(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return enhanceError("bucket discovery", err, discoverFlags.maxConcurrency)
 	}
+	buckets = filterExcludedBuckets(buckets, cfg.ExcludeBuckets, cfg.ExcludePrefixes)
 	printStatus("Discovered %d buckets", len(buckets))
 
 	// Analyze with discovery heuristics
@@ -232,15 +221,5 @@ func runDiscover(cmd *cobra.Command, args []string) error {
 }
 
 func applyConfigToDiscoverFlags(cmd *cobra.Command) {
-	if !cmd.Flags().Lookup("aws-region").Changed && cfg.Region != "" {
-		discoverFlags.awsRegion = cfg.Region
-	}
-	if !cmd.Flags().Lookup("format").Changed && cfg.Format != "" {
-		discoverFlags.outputFormat = cfg.Format
-	}
-	if !cmd.Flags().Lookup("timeout").Changed {
-		if d := cfg.TimeoutDuration(); d > 0 {
-			discoverFlags.timeout = d
-		}
-	}
+	applyCommonConfigDefaults(cmd, &discoverFlags.awsRegion, &discoverFlags.outputFormat, &discoverFlags.timeout)
 }
