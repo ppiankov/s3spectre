@@ -128,3 +128,51 @@ func TestAnalyzeDiscovery_OrdinaryRiskyBucketStillFlagged(t *testing.T) {
 		t.Errorf("expected ordinary old/inactive/empty bucket to be flagged, got status %s (score=%d)", discovery.Status, discovery.RiskScore)
 	}
 }
+
+// TestAnalyzeDiscovery_ManagedBucketStillFlaggedForPublicAccess guards against
+// the managed-bucket suppression being so broad it silently hides a real
+// security misconfiguration (public access) on a service-managed bucket --
+// suppressing the age/inactivity/empty "unused" signal must not suppress
+// independent security checks.
+func TestAnalyzeDiscovery_ManagedBucketStillFlaggedForPublicAccess(t *testing.T) {
+	buckets := map[string]*s3.BucketInfo{
+		"aws-cloudtrail-logs-123456789012-abcd1234": {
+			Name:         "aws-cloudtrail-logs-123456789012-abcd1234",
+			PublicAccess: &s3.PublicAccessInfo{IsPublic: true},
+		},
+	}
+
+	result := AnalyzeDiscovery(buckets, DiscoveryConfig{
+		CheckPublicAccess:  true,
+		RiskScoreThreshold: 60,
+	})
+
+	discovery := result.Buckets["aws-cloudtrail-logs-123456789012-abcd1234"]
+	if discovery.Status == StatusOK {
+		t.Errorf("expected publicly-accessible managed bucket to still be flagged, got %s (score=%d)", discovery.Status, discovery.RiskScore)
+	}
+	if discovery.RiskScore < 60 {
+		t.Errorf("expected public access risk score (60) to still be counted for managed bucket, got %d", discovery.RiskScore)
+	}
+}
+
+// TestAnalyze_ManagedBucketStillFlaggedForVersionSprawl guards against the
+// managed-bucket suppression hiding a real version-sprawl finding (versioning
+// enabled with no lifecycle rules), which is independent of "is this unused".
+func TestAnalyze_ManagedBucketStillFlaggedForVersionSprawl(t *testing.T) {
+	bucketInfo := map[string]*s3.BucketInfo{
+		"aws-cloudtrail-logs-123456789012-abcd1234": {
+			Name:              "aws-cloudtrail-logs-123456789012-abcd1234",
+			Exists:            true,
+			VersioningEnabled: true,
+			LifecycleRules:    0,
+		},
+	}
+
+	result := Analyze(nil, bucketInfo, Config{CheckUnused: true, UnusedScoreThreshold: 150})
+
+	analysis := result.Buckets["aws-cloudtrail-logs-123456789012-abcd1234"]
+	if analysis.Status != StatusVersionSprawl {
+		t.Errorf("expected managed bucket with real version sprawl to still be flagged %s, got %s", StatusVersionSprawl, analysis.Status)
+	}
+}
