@@ -38,6 +38,14 @@ cd s3spectre
 make build
 ```
 
+### Windows
+
+```powershell
+go install github.com/ppiankov/s3spectre/cmd/s3spectre@latest
+```
+
+Requires Go installed and `%GOPATH%\bin` (or `%GOBIN%`) on `PATH`.
+
 ### Usage
 
 ```sh
