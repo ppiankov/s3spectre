@@ -96,6 +96,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return enhanceError("repository scan", err, scanFlags.maxConcurrency)
 	}
+	references = filterExcludedReferences(references, cfg.ExcludeBuckets, cfg.ExcludePrefixes)
 	printStatus("Found %d S3 references in code", len(references))
 
 	// 2. Initialize S3 client

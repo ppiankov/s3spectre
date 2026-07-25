@@ -127,6 +127,7 @@ func runDiscover(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return enhanceError("bucket discovery", err, discoverFlags.maxConcurrency)
 	}
+	buckets = filterExcludedBuckets(buckets, cfg.ExcludeBuckets, cfg.ExcludePrefixes)
 	printStatus("Discovered %d buckets", len(buckets))
 
 	// Analyze with discovery heuristics

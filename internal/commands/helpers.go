@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/ppiankov/s3spectre/internal/report"
+	"github.com/ppiankov/s3spectre/internal/s3"
+	"github.com/ppiankov/s3spectre/internal/scanner"
 )
 
 func printStatus(format string, args ...interface{}) {
@@ -58,6 +60,53 @@ func enhanceError(operation string, err error, concurrency int) error {
 
 	// Default error with context
 	return fmt.Errorf("%s failed: %w", operation, err)
+}
+
+// isExcludedBucket reports whether name matches an exact entry in excludeBuckets
+// or is prefixed by any entry in excludePrefixes.
+func isExcludedBucket(name string, excludeBuckets, excludePrefixes []string) bool {
+	for _, b := range excludeBuckets {
+		if name == b {
+			return true
+		}
+	}
+	for _, p := range excludePrefixes {
+		if p != "" && strings.HasPrefix(name, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// filterExcludedReferences drops scan references whose bucket matches the config
+// exclude lists.
+func filterExcludedReferences(refs []scanner.Reference, excludeBuckets, excludePrefixes []string) []scanner.Reference {
+	if len(excludeBuckets) == 0 && len(excludePrefixes) == 0 {
+		return refs
+	}
+	filtered := make([]scanner.Reference, 0, len(refs))
+	for _, ref := range refs {
+		if isExcludedBucket(ref.Bucket, excludeBuckets, excludePrefixes) {
+			continue
+		}
+		filtered = append(filtered, ref)
+	}
+	return filtered
+}
+
+// filterExcludedBuckets drops discovered buckets matching the config exclude lists.
+func filterExcludedBuckets(buckets map[string]*s3.BucketInfo, excludeBuckets, excludePrefixes []string) map[string]*s3.BucketInfo {
+	if len(excludeBuckets) == 0 && len(excludePrefixes) == 0 {
+		return buckets
+	}
+	filtered := make(map[string]*s3.BucketInfo, len(buckets))
+	for name, b := range buckets {
+		if isExcludedBucket(name, excludeBuckets, excludePrefixes) {
+			continue
+		}
+		filtered[name] = b
+	}
+	return filtered
 }
 
 func selectReporter(format string, writer io.Writer) (report.Reporter, error) {

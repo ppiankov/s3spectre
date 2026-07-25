@@ -6,6 +6,9 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+
+	"github.com/ppiankov/s3spectre/internal/s3"
+	"github.com/ppiankov/s3spectre/internal/scanner"
 )
 
 func TestEnhanceError(t *testing.T) {
@@ -56,5 +59,66 @@ func TestGetVersion(t *testing.T) {
 	t.Cleanup(func() { version = "" })
 	if GetVersion() != "1.2.3" {
 		t.Fatalf("expected version %q, got %q", "1.2.3", GetVersion())
+	}
+}
+
+func TestIsExcludedBucket(t *testing.T) {
+	excludeBuckets := []string{"legacy-bucket"}
+	excludePrefixes := []string{"tmp-"}
+
+	cases := []struct {
+		name string
+		want bool
+	}{
+		{"legacy-bucket", true},
+		{"tmp-scratch", true},
+		{"tmp-", true},
+		{"production-data", false},
+		{"legacy-bucket-2", false},
+	}
+
+	for _, tt := range cases {
+		if got := isExcludedBucket(tt.name, excludeBuckets, excludePrefixes); got != tt.want {
+			t.Errorf("isExcludedBucket(%q) = %v, want %v", tt.name, got, tt.want)
+		}
+	}
+}
+
+func TestFilterExcludedReferences(t *testing.T) {
+	refs := []scanner.Reference{
+		{Bucket: "keep-me"},
+		{Bucket: "legacy-bucket"},
+		{Bucket: "tmp-scratch"},
+	}
+
+	filtered := filterExcludedReferences(refs, []string{"legacy-bucket"}, []string{"tmp-"})
+	if len(filtered) != 1 || filtered[0].Bucket != "keep-me" {
+		t.Fatalf("expected only keep-me to survive, got %+v", filtered)
+	}
+
+	unfiltered := filterExcludedReferences(refs, nil, nil)
+	if len(unfiltered) != len(refs) {
+		t.Fatalf("expected no filtering with empty exclude lists, got %d/%d", len(unfiltered), len(refs))
+	}
+}
+
+func TestFilterExcludedBuckets(t *testing.T) {
+	buckets := map[string]*s3.BucketInfo{
+		"keep-me":       {Name: "keep-me"},
+		"legacy-bucket": {Name: "legacy-bucket"},
+		"tmp-scratch":   {Name: "tmp-scratch"},
+	}
+
+	filtered := filterExcludedBuckets(buckets, []string{"legacy-bucket"}, []string{"tmp-"})
+	if len(filtered) != 1 {
+		t.Fatalf("expected only keep-me to survive, got %+v", filtered)
+	}
+	if _, ok := filtered["keep-me"]; !ok {
+		t.Fatalf("expected keep-me to survive, got %+v", filtered)
+	}
+
+	unfiltered := filterExcludedBuckets(buckets, nil, nil)
+	if len(unfiltered) != len(buckets) {
+		t.Fatalf("expected no filtering with empty exclude lists, got %d/%d", len(unfiltered), len(buckets))
 	}
 }
