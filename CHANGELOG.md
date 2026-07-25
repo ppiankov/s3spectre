@@ -5,6 +5,24 @@ All notable changes to S3Spectre will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-07-25
+
+### Fixed
+
+- `exclude_buckets` and `exclude_prefixes` config file keys are now applied to scan and discover output (previously parsed but ignored)
+- Scan and discover now agree on which tag values mark a bucket as deprecated (previously discover recognized a `retired` tag and scan did not)
+- Text report output now orders findings and risky buckets by severity/risk score instead of alphabetically, so critical findings are no longer buried among lower-severity noise
+- Buckets matching known AWS-managed naming conventions (CloudTrail logs, AWS Config, ELB access logs, CloudFormation templates) no longer get "delete if not needed" advice from the generic unused-bucket heuristics; they are still flagged normally for encryption, public access, and version sprawl
+
+### Added
+
+- Windows quick-start instructions in README and docs/QUICKSTART.md; CI now verifies a Windows build/test leg
+- Configuration file reference (`.s3spectre.yaml` keys) documented in docs/cli-reference.md
+
+### Changed
+
+- Consolidated duplicated config-default and region-selection logic in scan/discover into shared internal helpers
+
 ## [0.2.1] - 2026-02-23
 
 ### Added
@@ -52,6 +70,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Automatic retry with exponential backoff for transient S3 API errors
 - Enhanced error messages with actionable suggestions for common AWS failures (credentials, permissions, rate limiting)
 
-[Unreleased]: https://github.com/ppiankov/s3spectre/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/ppiankov/s3spectre/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/ppiankov/s3spectre/compare/v0.2.1...v0.2.2
+[0.2.1]: https://github.com/ppiankov/s3spectre/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/ppiankov/s3spectre/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/ppiankov/s3spectre/releases/tag/v0.1.0

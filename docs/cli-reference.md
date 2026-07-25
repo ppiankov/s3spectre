@@ -19,7 +19,37 @@ docker pull ghcr.io/ppiankov/s3spectre:latest
 # From source
 git clone https://github.com/ppiankov/s3spectre.git
 cd s3spectre && make build
+
+# Windows
+go install github.com/ppiankov/s3spectre/cmd/s3spectre@latest
 ```
+
+
+## Configuration file
+
+S3Spectre reads `.s3spectre.yaml` (or `.s3spectre.yml`) from the current directory, falling back to the user's home directory. Explicit CLI flags always take precedence over config file values.
+
+```yaml
+region: us-east-1
+exclude_buckets:
+  - legacy-shared-bucket
+  - aws-cloudtrail-logs-123456789012-abcd1234
+exclude_prefixes:
+  - tmp-
+  - sandbox-
+stale_days: 90
+format: json
+timeout: 5m
+```
+
+| Key | Applies to | Description |
+|-----|-----------|--------------|
+| `region` | scan, discover | Default AWS region when `--aws-region` is not set |
+| `exclude_buckets` | scan, discover | Exact bucket names to omit from all findings |
+| `exclude_prefixes` | scan, discover | Bucket-name prefixes to omit from all findings |
+| `stale_days` | scan | Default for `--stale-days` |
+| `format` | scan, discover | Default for `--format` |
+| `timeout` | scan, discover | Default for `--timeout` |
 
 
 ## Usage
@@ -177,6 +207,7 @@ Key design decisions:
 - **No real-time monitoring.** S3Spectre is a point-in-time scanner, not a daemon. Run it in CI or on a schedule.
 - **Single AWS account.** Cross-account scanning is not supported.
 - **Progress line artifacts.** The TTY progress indicator uses carriage return without clearing the full line, so shorter bucket names leave trailing characters from the previous name. Cosmetic only.
+- **AWS-managed bucket names are exempt from unused/stale advice.** Buckets matching known AWS-managed naming conventions (`aws-cloudtrail-logs-*`, `aws-config-bucket-*`, `elasticloadbalancing-*`, `cf-templates-*`) never get "delete if not needed" recommendations from age, inactivity, or emptiness alone -- deleting them would break the owning AWS service. They are still flagged normally for encryption, public access, and version sprawl.
 
 
 ## Roadmap
