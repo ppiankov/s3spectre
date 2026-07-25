@@ -2,7 +2,6 @@ package analyzer
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/ppiankov/s3spectre/internal/s3"
 )
@@ -119,7 +118,7 @@ func analyzeBucketDiscovery(info *s3.BucketInfo, config DiscoveryConfig) *Bucket
 	}
 
 	// Factor 4: Deprecated tags (20 points)
-	if hasDeprecatedTags(info.Tags) {
+	if isDeprecated, _, _ := IsDeprecatedTag(info.Tags); isDeprecated {
 		discovery.RiskScore += 20
 		discovery.RiskFactors = append(discovery.RiskFactors, "Has deprecated tags")
 		discovery.Recommendations = append(discovery.Recommendations,
@@ -173,26 +172,4 @@ func analyzeBucketDiscovery(info *s3.BucketInfo, config DiscoveryConfig) *Bucket
 	}
 
 	return discovery
-}
-
-// hasDeprecatedTags checks if bucket has deprecated tags
-func hasDeprecatedTags(tags map[string]string) bool {
-	if tags == nil {
-		return false
-	}
-
-	deprecatedTags := []string{"deprecated", "old", "unused", "delete", "obsolete", "legacy", "retired"}
-
-	for key, value := range tags {
-		keyLower := strings.ToLower(key)
-		valueLower := strings.ToLower(value)
-
-		for _, deprecated := range deprecatedTags {
-			if keyLower == deprecated || valueLower == deprecated {
-				return true
-			}
-		}
-	}
-
-	return false
 }

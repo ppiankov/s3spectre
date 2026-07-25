@@ -5,10 +5,12 @@ import (
 	"io"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/ppiankov/s3spectre/internal/report"
 	"github.com/ppiankov/s3spectre/internal/s3"
 	"github.com/ppiankov/s3spectre/internal/scanner"
+	"github.com/spf13/cobra"
 )
 
 func printStatus(format string, args ...interface{}) {
@@ -107,6 +109,44 @@ func filterExcludedBuckets(buckets map[string]*s3.BucketInfo, excludeBuckets, ex
 		filtered[name] = b
 	}
 	return filtered
+}
+
+// applyCommonConfigDefaults applies config file defaults for the aws-region,
+// format, and timeout flags when the user did not explicitly set them on the
+// command line. Shared by scan and discover, which otherwise duplicate this
+// logic verbatim.
+func applyCommonConfigDefaults(cmd *cobra.Command, region, format *string, timeout *time.Duration) {
+	if !cmd.Flags().Lookup("aws-region").Changed && cfg.Region != "" {
+		*region = cfg.Region
+	}
+	if !cmd.Flags().Lookup("format").Changed && cfg.Format != "" {
+		*format = cfg.Format
+	}
+	if !cmd.Flags().Lookup("timeout").Changed {
+		if d := cfg.TimeoutDuration(); d > 0 {
+			*timeout = d
+		}
+	}
+}
+
+// configureInspectorRegions sets the inspector's region scope from flags and
+// prints a status message, using the given message templates so scan and
+// discover can each keep their own wording. Shared to avoid the two commands
+// drifting on the underlying region-selection logic.
+func configureInspectorRegions(inspector *s3.Inspector, s3Client *s3.Client, regions []string, allRegions bool, awsRegion string, multiMsg, allMsg, singleMsg string) {
+	if len(regions) > 0 {
+		inspector.SetRegions(regions)
+		printStatus(multiMsg, strings.Join(regions, ", "))
+	} else if allRegions {
+		inspector.SetAllRegions(true)
+		printStatus(allMsg)
+	} else {
+		region := awsRegion
+		if region == "" {
+			region = s3Client.GetRegion()
+		}
+		printStatus(singleMsg, region)
+	}
 }
 
 func selectReporter(format string, writer io.Writer) (report.Reporter, error) {
