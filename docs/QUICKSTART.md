@@ -22,6 +22,8 @@ make build
 ./bin/s3spectre version
 ```
 
+On Windows, use `go install github.com/ppiankov/s3spectre/cmd/s3spectre@latest` instead.
+
 ## Quick Scan
 
 ### 1. Scan Your Repository
