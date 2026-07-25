@@ -93,6 +93,15 @@ func analyzeBucketDiscovery(info *s3.BucketInfo, config DiscoveryConfig) *Bucket
 		BucketInfo:      info,
 	}
 
+	// Service-managed buckets (CloudTrail, AWS Config, ELB logs, etc.) are
+	// excluded from risk scoring: they look unused/stale by generic
+	// heuristics but are required by another AWS service.
+	if IsServiceManagedBucket(info.Name) {
+		discovery.Status = StatusOK
+		discovery.Recommendations = append(discovery.Recommendations, managedBucketMessage)
+		return discovery
+	}
+
 	// Factor 1: Age (20 points if older than threshold)
 	if info.AgeInDays > config.AgeThresholdDays && config.AgeThresholdDays > 0 {
 		discovery.RiskScore += 20

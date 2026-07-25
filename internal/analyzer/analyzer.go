@@ -73,8 +73,16 @@ func analyzeBucket(bucket string, info *s3.BucketInfo, refs []scanner.Reference,
 		return analysis
 	}
 
-	// Check for unused bucket if enabled
+	// Check for unused bucket if enabled. Service-managed buckets (CloudTrail,
+	// AWS Config, ELB logs, etc.) are excluded: they look unused by generic
+	// heuristics but are required by another AWS service.
 	if config.CheckUnused {
+		if IsServiceManagedBucket(bucket) {
+			analysis.Status = StatusOK
+			analysis.Message = managedBucketMessage
+			return analysis
+		}
+
 		unusedScore := calculateUnusedScore(bucket, info, referencedBuckets, config)
 		analysis.UnusedScore = unusedScore
 
