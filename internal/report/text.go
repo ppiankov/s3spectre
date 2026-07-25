@@ -35,6 +35,18 @@ func formatBytes(bytes int64) string {
 	return fmt.Sprintf("%.2f %s", float64(bytes)/float64(div), sizes[exp])
 }
 
+// sortBucketsByRiskScore sorts bucket names by descending RiskScore, using the
+// name as a stable tiebreaker, instead of plain alphabetical order.
+func sortBucketsByRiskScore(names []string, buckets map[string]*analyzer.BucketDiscovery) {
+	sort.Slice(names, func(i, j int) bool {
+		bi, bj := buckets[names[i]], buckets[names[j]]
+		if bi.RiskScore != bj.RiskScore {
+			return bi.RiskScore > bj.RiskScore
+		}
+		return names[i] < names[j]
+	})
+}
+
 // Generate generates a text report
 func (r *TextReporter) Generate(data Data) error {
 	// Header
@@ -149,19 +161,6 @@ func (r *TextReporter) printFindings(buckets map[string]*analyzer.BucketAnalysis
 		_, _ = fmt.Fprintf(r.writer, "\n")
 	}
 
-	// Print stale prefixes
-	if len(summary.StalePrefixes) > 0 {
-		_, _ = fmt.Fprintf(r.writer, "%s\n", color.YellowString("Stale Prefixes"))
-		_, _ = fmt.Fprintf(r.writer, "%s\n", strings.Repeat("-", 50))
-		sort.Strings(summary.StalePrefixes)
-		for _, prefixPath := range summary.StalePrefixes {
-			_, _ = fmt.Fprintf(r.writer, "  %s: %s\n",
-				color.YellowString("[STALE_PREFIX]"),
-				prefixPath)
-		}
-		_, _ = fmt.Fprintf(r.writer, "\n")
-	}
-
 	// Print missing prefixes
 	if len(summary.MissingPrefixes) > 0 {
 		_, _ = fmt.Fprintf(r.writer, "%s\n", color.YellowString("Missing Prefixes"))
@@ -205,6 +204,20 @@ func (r *TextReporter) printFindings(buckets map[string]*analyzer.BucketAnalysis
 			if analysis.Message != "" {
 				_, _ = fmt.Fprintf(r.writer, "    %s\n", analysis.Message)
 			}
+		}
+		_, _ = fmt.Fprintf(r.writer, "\n")
+	}
+
+	// Print stale prefixes (low severity, so printed after the medium-severity
+	// categories above rather than ahead of them).
+	if len(summary.StalePrefixes) > 0 {
+		_, _ = fmt.Fprintf(r.writer, "%s\n", color.YellowString("Stale Prefixes"))
+		_, _ = fmt.Fprintf(r.writer, "%s\n", strings.Repeat("-", 50))
+		sort.Strings(summary.StalePrefixes)
+		for _, prefixPath := range summary.StalePrefixes {
+			_, _ = fmt.Fprintf(r.writer, "  %s: %s\n",
+				color.YellowString("[STALE_PREFIX]"),
+				prefixPath)
 		}
 		_, _ = fmt.Fprintf(r.writer, "\n")
 	}
@@ -295,15 +308,16 @@ func (r *TextReporter) printDiscoverySummary(summary analyzer.DiscoverySummary) 
 }
 
 func (r *TextReporter) printDiscoveryFindings(buckets map[string]*analyzer.BucketDiscovery, summary analyzer.DiscoverySummary) {
-	// Print unused buckets
-	if len(summary.UnusedBuckets) > 0 {
-		_, _ = fmt.Fprintf(r.writer, "%s\n", color.YellowString("Unused Buckets"))
+	// Print risky buckets first (highest severity category); sorted by risk
+	// score descending since severity varies per-bucket within this category.
+	if len(summary.RiskyBuckets) > 0 {
+		_, _ = fmt.Fprintf(r.writer, "%s\n", color.RedString("Risky Buckets"))
 		_, _ = fmt.Fprintf(r.writer, "%s\n", strings.Repeat("-", 70))
-		sort.Strings(summary.UnusedBuckets)
-		for _, bucket := range summary.UnusedBuckets {
+		sortBucketsByRiskScore(summary.RiskyBuckets, buckets)
+		for _, bucket := range summary.RiskyBuckets {
 			discovery := buckets[bucket]
 			_, _ = fmt.Fprintf(r.writer, "  %s: %s (%s)\n",
-				color.YellowString("[UNUSED]"),
+				color.RedString("[RISKY]"),
 				bucket,
 				discovery.Region)
 			_, _ = fmt.Fprintf(r.writer, "    Risk Score: %d/100\n", discovery.RiskScore)
@@ -323,15 +337,15 @@ func (r *TextReporter) printDiscoveryFindings(buckets map[string]*analyzer.Bucke
 		}
 	}
 
-	// Print risky buckets
-	if len(summary.RiskyBuckets) > 0 {
-		_, _ = fmt.Fprintf(r.writer, "%s\n", color.RedString("Risky Buckets"))
+	// Print unused buckets
+	if len(summary.UnusedBuckets) > 0 {
+		_, _ = fmt.Fprintf(r.writer, "%s\n", color.YellowString("Unused Buckets"))
 		_, _ = fmt.Fprintf(r.writer, "%s\n", strings.Repeat("-", 70))
-		sort.Strings(summary.RiskyBuckets)
-		for _, bucket := range summary.RiskyBuckets {
+		sort.Strings(summary.UnusedBuckets)
+		for _, bucket := range summary.UnusedBuckets {
 			discovery := buckets[bucket]
 			_, _ = fmt.Fprintf(r.writer, "  %s: %s (%s)\n",
-				color.RedString("[RISKY]"),
+				color.YellowString("[UNUSED]"),
 				bucket,
 				discovery.Region)
 			_, _ = fmt.Fprintf(r.writer, "    Risk Score: %d/100\n", discovery.RiskScore)
