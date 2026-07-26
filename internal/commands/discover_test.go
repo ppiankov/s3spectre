@@ -84,6 +84,14 @@ func TestDiscoverSelectReporter(t *testing.T) {
 		t.Fatalf("expected SARIFReporter, got %T", reporter)
 	}
 
+	reporter, err = selectReporter("markdown", &buf)
+	if err != nil {
+		t.Fatalf("expected no error for markdown, got %v", err)
+	}
+	if _, ok := reporter.(*report.MarkdownReporter); !ok {
+		t.Fatalf("expected MarkdownReporter, got %T", reporter)
+	}
+
 	_, err = selectReporter("yaml", &buf)
 	if err == nil {
 		t.Fatalf("expected error for unsupported format")

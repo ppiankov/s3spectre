@@ -58,7 +58,7 @@ func init() {
 	discoverCmd.Flags().BoolVar(&discoverFlags.checkPublic, "check-public", false, "Check for public access")
 	discoverCmd.Flags().BoolVar(&discoverFlags.estimateCost, "estimate-cost", false, "Estimate monthly USD cost of version-sprawl storage overhead (approximate)")
 	discoverCmd.Flags().IntVar(&discoverFlags.maxConcurrency, "concurrency", 10, "Max concurrent S3 API calls")
-	discoverCmd.Flags().StringVarP(&discoverFlags.outputFormat, "format", "f", "text", "Output format: text, json, sarif, or spectrehub")
+	discoverCmd.Flags().StringVarP(&discoverFlags.outputFormat, "format", "f", "text", "Output format: text, json, sarif, spectrehub, or markdown")
 	discoverCmd.Flags().StringVarP(&discoverFlags.outputFile, "output", "o", "", "Output file (default: stdout)")
 	discoverCmd.Flags().BoolVar(&discoverFlags.failOnUnused, "fail-on-unused", false, "Exit with error if unused buckets found")
 	discoverCmd.Flags().BoolVar(&discoverFlags.failOnRisky, "fail-on-risky", false, "Exit with error if risky buckets found")

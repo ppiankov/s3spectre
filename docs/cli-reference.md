@@ -92,7 +92,7 @@ s3spectre scan --repo . --include-references --format json
 | `--check-unused` | `false` | Enable unused bucket scoring |
 | `--unused-threshold-days` | `180` | Unused bucket threshold |
 | `--concurrency` | `10` | Max concurrent S3 API calls |
-| `--format, -f` | `text` | Output format: `text` or `json` |
+| `--format, -f` | `text` | Output format: `text`, `json`, `sarif`, `spectrehub`, or `markdown` |
 | `--output, -o` | stdout | Output file |
 | `--fail-on-missing` | `false` | Exit non-zero on missing buckets |
 | `--fail-on-stale` | `false` | Exit non-zero on stale prefixes |
@@ -133,7 +133,7 @@ s3spectre discover --fail-on-unused --fail-on-risky --format json
 | `--check-public` | `false` | Flag public access |
 | `--estimate-cost` | `false` | Approximate monthly USD cost of version-sprawl overhead |
 | `--concurrency` | `10` | Max concurrent S3 API calls |
-| `--format, -f` | `text` | Output format: `text` or `json` |
+| `--format, -f` | `text` | Output format: `text`, `json`, `sarif`, `spectrehub`, or `markdown` |
 | `--output, -o` | stdout | Output file |
 | `--fail-on-unused` | `false` | Exit non-zero on unused buckets |
 | `--fail-on-risky` | `false` | Exit non-zero on risky configs |
