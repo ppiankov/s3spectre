@@ -113,11 +113,11 @@ func (r *MarkdownReporter) writeTagRollup(rollup map[string]*analyzer.TagGroupSu
 	})
 
 	fmt.Fprintf(r.writer, "## Rollup by tag\n\n")
-	fmt.Fprintf(r.writer, "| Tag | Buckets | Risk Score | Unused | Risky | Inactive | Version Sprawl |\n|---|---|---|---|---|---|---|\n")
+	fmt.Fprintf(r.writer, "| Tag | Buckets | Risk Score | Avg Risk/Bucket | Unused | Risky | Inactive | Version Sprawl |\n|---|---|---|---|---|---|---|---|\n")
 	for _, k := range keys {
 		g := rollup[k]
-		fmt.Fprintf(r.writer, "| %s | %d | %d | %d | %d | %d | %d |\n",
-			k, g.BucketCount, g.RiskScore, g.UnusedCount, g.RiskyCount, g.InactiveCount, g.VersionSprawlCount)
+		fmt.Fprintf(r.writer, "| %s | %d | %d | %.1f | %d | %d | %d | %d |\n",
+			k, g.BucketCount, g.RiskScore, g.AverageRiskScore, g.UnusedCount, g.RiskyCount, g.InactiveCount, g.VersionSprawlCount)
 	}
 	fmt.Fprintf(r.writer, "\n")
 }

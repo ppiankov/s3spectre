@@ -120,6 +120,12 @@ type TagGroupSummary struct {
 	RiskyCount         int `json:"risky_count"`
 	InactiveCount      int `json:"inactive_count"`
 	VersionSprawlCount int `json:"version_sprawl_count"`
+	// AverageRiskScore is RiskScore/BucketCount, computed once the full
+	// rollup is known (not incrementally, since an average isn't additive).
+	// The raw RiskScore sum is biased toward tag values owning more
+	// buckets; this field surfaces per-bucket severity so a small,
+	// high-severity group isn't buried under a large, low-severity one.
+	AverageRiskScore float64 `json:"average_risk_score"`
 }
 
 // untaggedGroupKey is the rollup bucket for buckets missing the configured
@@ -178,6 +184,16 @@ func AnalyzeDiscovery(buckets map[string]*s3.BucketInfo, config DiscoveryConfig)
 	}
 
 	result.Summary.TotalRegions = len(regions)
+
+	// AverageRiskScore is computed once per group over the finished rollup,
+	// not incrementally in addToTagRollup, since an average isn't additive
+	// across bucket-by-bucket updates. BucketCount is always >=1 for any
+	// entry present in the map (addToTagRollup only creates an entry when
+	// adding a bucket to it), so this never divides by zero.
+	for _, group := range result.Summary.TagRollup {
+		group.AverageRiskScore = float64(group.RiskScore) / float64(group.BucketCount)
+	}
+
 	return result
 }
 

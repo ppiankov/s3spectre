@@ -254,3 +254,51 @@ func TestMarkdownReporter_GenerateDiscovery_TotalCostAndTagRollup(t *testing.T) 
 		t.Fatalf("expected a Rollup by tag section with both groups, got: %s", out)
 	}
 }
+
+func TestMarkdownReporter_GenerateDiscovery_TagRollup_AverageRiskScoreColumn(t *testing.T) {
+	var buf bytes.Buffer
+	reporter := NewMarkdownReporter(&buf)
+
+	data := DiscoveryData{
+		Tool: "s3spectre",
+		Summary: analyzer.DiscoverySummary{
+			TotalBuckets: 2,
+			TagRollup: map[string]*analyzer.TagGroupSummary{
+				"backend": {BucketCount: 2, RiskScore: 40, AverageRiskScore: 20},
+			},
+		},
+	}
+
+	if err := reporter.GenerateDiscovery(data); err != nil {
+		t.Fatalf("GenerateDiscovery failed: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "Avg Risk/Bucket") {
+		t.Fatalf("expected an Avg Risk/Bucket column header, got: %s", out)
+	}
+	if !strings.Contains(out, "| 20.0 |") {
+		t.Fatalf("expected the average risk score value rendered, got: %s", out)
+	}
+
+	// Guard against a header-row/data-row column-count mismatch (a common
+	// bug when a column is added to only one of the two rows).
+	lines := strings.Split(out, "\n")
+	var headerCols, separatorCols, dataCols int
+	for _, line := range lines {
+		switch {
+		case strings.HasPrefix(line, "| Tag |"):
+			headerCols = strings.Count(line, "|")
+		case strings.HasPrefix(line, "|---|"):
+			separatorCols = strings.Count(line, "|")
+		case strings.HasPrefix(line, "| backend |"):
+			dataCols = strings.Count(line, "|")
+		}
+	}
+	if headerCols == 0 || separatorCols == 0 || dataCols == 0 {
+		t.Fatalf("expected to find header, separator, and data rows, got: %s", out)
+	}
+	if headerCols != separatorCols || headerCols != dataCols {
+		t.Fatalf("expected matching column counts (header=%d separator=%d data=%d), got: %s", headerCols, separatorCols, dataCols, out)
+	}
+}

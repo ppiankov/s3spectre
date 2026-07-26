@@ -237,7 +237,7 @@ func TestSpectreHubReporter_GenerateDiscovery_TagRollup(t *testing.T) {
 		Summary: analyzer.DiscoverySummary{
 			TotalBuckets: 1,
 			TagRollup: map[string]*analyzer.TagGroupSummary{
-				"backend": {BucketCount: 1, RiskScore: 50},
+				"backend": {BucketCount: 1, RiskScore: 50, AverageRiskScore: 50},
 			},
 		},
 	}
@@ -254,8 +254,8 @@ func TestSpectreHubReporter_GenerateDiscovery_TagRollup(t *testing.T) {
 	}
 
 	backend := envelope.Summary.TagRollup["backend"]
-	if backend == nil || backend.BucketCount != 1 || backend.RiskScore != 50 {
-		t.Errorf("expected tag_rollup.backend in spectrehub envelope, got %+v", envelope.Summary.TagRollup)
+	if backend == nil || backend.BucketCount != 1 || backend.RiskScore != 50 || backend.AverageRiskScore != 50 {
+		t.Errorf("expected tag_rollup.backend (including average_risk_score) in spectrehub envelope, got %+v", envelope.Summary.TagRollup)
 	}
 }
 

@@ -652,3 +652,28 @@ func TestTextReporter_TagRollup_TiedRiskScoreBreaksAlphabetically(t *testing.T) 
 		t.Fatalf("expected alphabetical tiebreak (alpha before zeta) for tied risk scores, got order in: %s", out)
 	}
 }
+
+func TestTextReporter_TagRollup_ShowsAverageRiskScore(t *testing.T) {
+	setNoColor(t)
+	var buf bytes.Buffer
+	reporter := NewTextReporter(&buf)
+
+	data := DiscoveryData{
+		Tool: "s3spectre",
+		Summary: analyzer.DiscoverySummary{
+			TotalBuckets: 2,
+			TagRollup: map[string]*analyzer.TagGroupSummary{
+				"backend": {BucketCount: 2, RiskScore: 40, AverageRiskScore: 20},
+			},
+		},
+	}
+
+	if err := reporter.GenerateDiscovery(data); err != nil {
+		t.Fatalf("GenerateDiscovery failed: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "avg 20.0/bucket") {
+		t.Fatalf("expected average risk score in the rollup line, got: %s", out)
+	}
+}
