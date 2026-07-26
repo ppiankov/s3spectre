@@ -5,6 +5,12 @@ All notable changes to S3Spectre will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] - 2026-07-27
+
+### Fixed
+
+- `discover --regions` (and default all-regions scans) no longer silently drop a bucket whose legacy `GetBucketLocation` constraint (e.g. the historic `EU` value for `eu-west-1`) doesn't match a modern region name; the known legacy value is now mapped, and any other unrecognized value fails open (bucket stays visible, warning logged) instead of vanishing
+
 ## [0.6.0] - 2026-07-26
 
 ### Added
@@ -109,7 +115,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Automatic retry with exponential backoff for transient S3 API errors
 - Enhanced error messages with actionable suggestions for common AWS failures (credentials, permissions, rate limiting)
 
-[Unreleased]: https://github.com/ppiankov/s3spectre/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/ppiankov/s3spectre/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/ppiankov/s3spectre/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/ppiankov/s3spectre/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/ppiankov/s3spectre/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/ppiankov/s3spectre/compare/v0.3.0...v0.4.0
