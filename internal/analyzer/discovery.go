@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/ppiankov/s3spectre/internal/pricing"
+	"github.com/ppiankov/s3spectre/internal/remediation"
 	"github.com/ppiankov/s3spectre/internal/s3"
 )
 
@@ -15,6 +16,14 @@ type DiscoveryConfig struct {
 	CheckPublicAccess       bool
 	RiskScoreThreshold      int
 	EstimateCost            bool
+	// PublicBucketAllowlistPatterns extends (does not replace) the built-in
+	// naming patterns used to recognize intentionally-public buckets.
+	PublicBucketAllowlistPatterns []string
+	// SuggestLifecyclePolicy, when true, attaches a deterministic
+	// (JSON + Terraform) lifecycle-rule suggestion to VERSION_SPRAWL
+	// findings. Informational only -- s3spectre never calls any AWS write
+	// API itself.
+	SuggestLifecyclePolicy bool
 }
 
 // DiscoveryResult contains discovery analysis results
@@ -36,6 +45,33 @@ type BucketDiscovery struct {
 	// overhead (TotalVersionSize minus TotalSize) for a VersionSprawl finding.
 	// Only populated when DiscoveryConfig.EstimateCost is set; 0 otherwise.
 	EstimatedMonthlyCostUSD float64 `json:"estimated_monthly_cost_usd,omitempty"`
+	// EstimatedStorageCostUSD is an approximate monthly cost of a bucket's
+	// full TotalSize, populated only for Inactive/UnusedBucket findings when
+	// DiscoveryConfig.EstimateCost is set. Kept distinct from
+	// EstimatedMonthlyCostUSD (version-sprawl overhead only) so the two
+	// pricing scopes are never conflated under one ambiguous number.
+	// analyzeBucketDiscovery only populates this field when
+	// EstimatedMonthlyCostUSD is still zero -- a bucket's raw version-sprawl
+	// condition (VersioningEnabled && LifecycleRules == 0) is independent of
+	// its final Status, so relying on Status alone to keep these mutually
+	// exclusive is not sufficient.
+	EstimatedStorageCostUSD float64 `json:"estimated_storage_cost_usd,omitempty"`
+	// LifecyclePolicySuggestion is a deterministic, human-reviewed lifecycle
+	// rule snippet for a VersionSprawl finding. Only populated when
+	// DiscoveryConfig.SuggestLifecyclePolicy is set; suggestion only, never
+	// applied by s3spectre itself.
+	LifecyclePolicySuggestion *remediation.LifecyclePolicySuggestion `json:"lifecycle_policy_suggestion,omitempty"`
+}
+
+// CostUSD returns whichever cost estimate is populated for this bucket
+// (version-sprawl overhead or full-bucket storage). At most one is ever
+// nonzero -- analyzeBucketDiscovery only sets EstimatedStorageCostUSD when
+// EstimatedMonthlyCostUSD is still zero.
+func (b *BucketDiscovery) CostUSD() float64 {
+	if b.EstimatedMonthlyCostUSD > 0 {
+		return b.EstimatedMonthlyCostUSD
+	}
+	return b.EstimatedStorageCostUSD
 }
 
 // DiscoverySummary contains high-level summary
@@ -50,7 +86,15 @@ type DiscoverySummary struct {
 	// of lifecycle-rule configuration -- an informational inventory, distinct
 	// from VersionSprawl (which only lists the misconfigured subset).
 	VersionedBuckets []string `json:"versioned_buckets,omitempty"`
-	TotalRegions     int      `json:"total_regions"`
+	// PublicBuckets lists every bucket with public access enabled, regardless
+	// of naming-allowlist status -- an informational inventory so an
+	// allowlisted (reduced-severity) bucket is never silently dropped from
+	// evidence. Populated whenever bucket_info.public_access.is_public is
+	// true, independent of RiskScoreThreshold and CheckPublicAccess (the
+	// underlying API call is unconditional; CheckPublicAccess only gates
+	// scoring).
+	PublicBuckets []string `json:"public_buckets,omitempty"`
+	TotalRegions  int      `json:"total_regions"`
 }
 
 // AnalyzeDiscovery analyzes buckets discovered from AWS
@@ -76,6 +120,10 @@ func AnalyzeDiscovery(buckets map[string]*s3.BucketInfo, config DiscoveryConfig)
 
 		if info.VersioningEnabled {
 			result.Summary.VersionedBuckets = append(result.Summary.VersionedBuckets, name)
+		}
+
+		if info.PublicAccess != nil && info.PublicAccess.IsPublic {
+			result.Summary.PublicBuckets = append(result.Summary.PublicBuckets, name)
 		}
 
 		switch discovery.Status {
@@ -167,6 +215,11 @@ func analyzeBucketDiscovery(info *s3.BucketInfo, config DiscoveryConfig) *Bucket
 			overhead := info.TotalVersionSize - info.TotalSize
 			discovery.EstimatedMonthlyCostUSD = pricing.MonthlyStorageCost(overhead, info.Region)
 		}
+
+		if config.SuggestLifecyclePolicy {
+			suggestion := remediation.SuggestLifecyclePolicy(info.Name)
+			discovery.LifecyclePolicySuggestion = &suggestion
+		}
 	}
 
 	// Factor 6: No encryption (40 points) - if check enabled
@@ -177,12 +230,22 @@ func analyzeBucketDiscovery(info *s3.BucketInfo, config DiscoveryConfig) *Bucket
 			"Enable default encryption (AES256 or KMS)")
 	}
 
-	// Factor 7: Public access (60 points - high risk) - if check enabled
+	// Factor 7: Public access (60 points - high risk, halved to 30 for
+	// buckets matching a naming convention for intentionally-public content)
+	// - if check enabled
 	if config.CheckPublicAccess && info.PublicAccess != nil && info.PublicAccess.IsPublic {
-		discovery.RiskScore += 60
-		discovery.RiskFactors = append(discovery.RiskFactors, "Public access enabled")
-		discovery.Recommendations = append(discovery.Recommendations,
-			"Review and restrict public access if not required")
+		if IsAllowlistedPublicBucket(info.Name, config.PublicBucketAllowlistPatterns) {
+			discovery.RiskScore += 30
+			discovery.RiskFactors = append(discovery.RiskFactors,
+				"Public access enabled (naming suggests intentional)")
+			discovery.Recommendations = append(discovery.Recommendations,
+				"Public access appears intentional based on naming convention; verify this is still correct")
+		} else {
+			discovery.RiskScore += 60
+			discovery.RiskFactors = append(discovery.RiskFactors, "Public access enabled")
+			discovery.Recommendations = append(discovery.Recommendations,
+				"Review and restrict public access if not required")
+		}
 	}
 
 	// Determine status based on risk score and factors
@@ -209,6 +272,21 @@ func analyzeBucketDiscovery(info *s3.BucketInfo, config DiscoveryConfig) *Bucket
 		}
 	} else {
 		discovery.Status = StatusOK
+	}
+
+	// Price full bucket storage for Inactive/UnusedBucket findings -- the
+	// more actionable "this has sat unused and costs you $X/month" figure,
+	// distinct in scope from the version-sprawl overhead cost above. Guarded
+	// on EstimatedMonthlyCostUSD == 0: the version-sprawl raw condition
+	// (VersioningEnabled && LifecycleRules == 0) is independent of the final
+	// Status classification above, so a bucket can be both empty/stale
+	// (Status ends up Unused/Inactive, since that case is checked first in
+	// the switch) AND version-sprawling (the Factor 5 cost block above still
+	// ran). Without this guard both cost fields would populate for the same
+	// bucket, contradicting CostUSD()'s "at most one populated" invariant.
+	if config.EstimateCost && info.TotalSize > 0 && discovery.EstimatedMonthlyCostUSD == 0 &&
+		(discovery.Status == StatusInactive || discovery.Status == StatusUnusedBucket) {
+		discovery.EstimatedStorageCostUSD = pricing.MonthlyStorageCost(info.TotalSize, info.Region)
 	}
 
 	if managed {

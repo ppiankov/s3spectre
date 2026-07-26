@@ -53,6 +53,7 @@ timeout: 5m
 | `format` | scan, discover | Default for `--format` |
 | `timeout` | scan, discover | Default for `--timeout` |
 | `risk_threshold` | discover | Default for `--risk-threshold` |
+| `public_bucket_allowlist_patterns` | discover | Naming substrings (case-insensitive) for intentionally-public buckets; extends, does not replace, the built-in defaults (`public`, `webview`, `-cdn`, `-landing`) |
 
 
 ## Usage
@@ -133,7 +134,8 @@ s3spectre discover --fail-on-unused --fail-on-risky --format json
 | `--risk-threshold` | `100` | Risk score at which a bucket is flagged unused/risky/inactive |
 | `--check-encryption` | `false` | Flag missing encryption |
 | `--check-public` | `false` | Flag public access |
-| `--estimate-cost` | `false` | Approximate monthly USD cost of version-sprawl overhead |
+| `--estimate-cost` | `false` | Approximate monthly USD cost of version-sprawl overhead, and of inactive/unused bucket storage |
+| `--suggest-lifecycle-policy` | `false` | Suggest a deterministic lifecycle-rule snippet (JSON + Terraform) for version-sprawl findings; informational only, never applied |
 | `--concurrency` | `10` | Max concurrent S3 API calls |
 | `--format, -f` | `text` | Output format: `text`, `json`, `sarif`, `spectrehub`, or `markdown` |
 | `--output, -o` | stdout | Output file |
@@ -207,7 +209,9 @@ Key design decisions:
 
 - **No object-level scanning.** S3Spectre inspects bucket and prefix metadata. It does not list or read individual objects beyond what is needed for prefix existence and staleness checks.
 - **Regex-based code scanning.** The scanner uses pattern matching, not AST parsing. It will miss dynamically constructed bucket names and may produce false positives on commented-out code.
-- **No cost estimation by default.** `discover --estimate-cost` gives an approximate monthly USD figure for version-sprawl storage overhead, using an embedded on-demand pricing table (S3 Standard only, no request/data-transfer charges). Everything else -- unused/inactive bucket findings, scan mode -- remains unpriced.
+- **No cost estimation by default.** `discover --estimate-cost` gives an approximate monthly USD figure for version-sprawl storage overhead, and separately for the full storage of buckets flagged inactive/unused, using an embedded on-demand pricing table (S3 Standard only, no request/data-transfer charges). Risky/OK buckets and scan mode remain unpriced.
+- **Public-access naming allowlist is a severity reduction, not a suppression.** Matching is a case-insensitive substring test, not a glob -- a bucket name containing `public`, `webview`, `-cdn`, or `-landing` (built-in defaults) or any `public_bucket_allowlist_patterns` config entry still gets flagged public at half severity and always appears in the `public_buckets` inventory -- nothing is silently dropped from evidence.
+- **Lifecycle-policy suggestions are advisory only.** `discover --suggest-lifecycle-policy` generates a JSON and Terraform snippet from already-collected bucket metadata for version-sprawl findings. s3spectre never calls any AWS write API and never applies the suggestion; it is text for an operator to review and apply through their own deployment path.
 - **IAM permissions required.** Needs `s3:ListBucket`, `s3:ListAllMyBuckets`, `s3:GetBucketLocation`, `s3:GetBucketVersioning`, `s3:GetLifecycleConfiguration`, `s3:GetBucketTagging`, `s3:GetEncryptionConfiguration`, and `s3:GetBucketPublicAccessBlock`. `discover` always calls the encryption and public-access-block APIs (not just when `--check-encryption`/`--check-public` are passed -- those flags only gate whether the analyzer scores the result), so missing either permission is not purely cosmetic. Missing permissions for the core listing/inspection calls produce access-denied errors; missing permissions specifically for `GetEncryptionConfiguration`/`GetBucketPublicAccessBlock` instead silently omit those two fields for the affected bucket (`--check-encryption`/`--check-public` findings for it), rather than failing the whole scan.
 - **No real-time monitoring.** S3Spectre is a point-in-time scanner, not a daemon. Run it in CI or on a schedule.
 - **Single AWS account.** Cross-account scanning is not supported.
@@ -217,7 +221,6 @@ Key design decisions:
 
 ## Roadmap
 
-- Cost estimation for unused and stale resources
 - Deep prefix scanning with pagination
 - Replication rule validation
 - IAM access path analysis

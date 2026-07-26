@@ -19,7 +19,8 @@
 - Not a replacement for AWS Config Rules or GuardDuty — not real-time
 - Not a data scanner — never reads object contents, only metadata
 - Not a remediation tool — reports only, never modifies buckets
-- Not a cost calculator by default — `--estimate-cost` gives an approximate monthly figure for version-sprawl overhead only, everything else stays unpriced
+- Not a cost calculator by default — `--estimate-cost` gives an approximate monthly figure for version-sprawl overhead and for inactive/unused bucket storage only, everything else stays unpriced
+- Not an auto-remediation tool — `--suggest-lifecycle-policy` generates a suggestion to review and apply yourself; s3spectre never calls an AWS write API
 
 ## Quick start
 

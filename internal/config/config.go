@@ -22,6 +22,11 @@ type Config struct {
 	Format          string   `yaml:"format"`
 	Timeout         string   `yaml:"timeout"`
 	RiskThreshold   int      `yaml:"risk_threshold"`
+	// PublicBucketAllowlistPatterns extends the built-in naming patterns
+	// (discover --check-public) used to recognize intentionally-public
+	// buckets. Additive: these patterns are added to, not a replacement for,
+	// the defaults.
+	PublicBucketAllowlistPatterns []string `yaml:"public_bucket_allowlist_patterns"`
 }
 
 // TimeoutDuration parses the Timeout field as a Go duration.
