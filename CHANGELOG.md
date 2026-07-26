@@ -5,6 +5,14 @@ All notable changes to S3Spectre will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-07-26
+
+### Added
+
+- `discover --estimate-cost` now also reports a `total_estimated_cost_usd` account-level sum across all buckets, instead of requiring the operator to add up per-bucket figures manually
+- `--group-by-tag <key>` flag (discover) rolls the summary up by a bucket tag value (e.g. `Team`), reporting bucket count and summed risk score per value; buckets missing the tag land under an explicit `untagged` group
+- `discover --check-encryption` now distinguishes the AWS-managed default KMS key (`alias/aws/s3`) from a customer-managed key with a separate, lower-severity risk factor
+
 ## [0.4.0] - 2026-07-26
 
 ### Added
@@ -95,7 +103,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Automatic retry with exponential backoff for transient S3 API errors
 - Enhanced error messages with actionable suggestions for common AWS failures (credentials, permissions, rate limiting)
 
-[Unreleased]: https://github.com/ppiankov/s3spectre/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/ppiankov/s3spectre/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/ppiankov/s3spectre/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/ppiankov/s3spectre/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/ppiankov/s3spectre/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/ppiankov/s3spectre/compare/v0.2.1...v0.2.2
