@@ -5,6 +5,23 @@ All notable changes to S3Spectre will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-07-26
+
+### Added
+
+- `--risk-threshold` flag and `risk_threshold` config key to tune the discover risk-score cutoff; the inactivity signal now scales with severity (past 2x/5x the inactive-days threshold) so multi-year-stale buckets can cross the default threshold on that signal alone
+- Informational "Versioned Buckets" inventory (scan and discover) listing every bucket with versioning enabled, independent of the version-sprawl misconfiguration check
+- `--estimate-cost` flag (discover) for an approximate monthly USD estimate of version-sprawl storage overhead, using an embedded S3 Standard pricing table
+- Markdown output format (`--format markdown`) for scan and discover
+- Windows prebuilt release `.zip` documented as the primary Windows install path, verified against real release assets
+
+### Fixed
+
+- `discover --check-encryption`/`--check-public` now actually populate encryption and public-access data; previously the underlying AWS API calls were never made, so both flags silently produced zero findings regardless of actual exposure
+- `discover --regions` now actually limits which buckets are scanned; previously the flag was ignored and the whole account was always scanned
+- A genuine API error while checking encryption/public-access (e.g. permission denied) no longer defaults to a false-positive "public access enabled" finding -- it's now left unknown rather than guessed
+- SpectreHub links in README/QUICKSTART now point to spectrehub.dev instead of a private GitHub repo
+
 ## [0.2.2] - 2026-07-25
 
 ### Fixed
@@ -70,7 +87,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Automatic retry with exponential backoff for transient S3 API errors
 - Enhanced error messages with actionable suggestions for common AWS failures (credentials, permissions, rate limiting)
 
-[Unreleased]: https://github.com/ppiankov/s3spectre/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/ppiankov/s3spectre/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/ppiankov/s3spectre/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/ppiankov/s3spectre/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/ppiankov/s3spectre/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/ppiankov/s3spectre/compare/v0.1.0...v0.2.0
