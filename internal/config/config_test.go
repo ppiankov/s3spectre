@@ -30,6 +30,9 @@ exclude_buckets:
   - test-bucket
 exclude_prefixes:
   - logs/
+public_bucket_allowlist_patterns:
+  - static-assets
+  - -assets-cdn
 `
 	if err := os.WriteFile(filepath.Join(dir, ".s3spectre.yaml"), []byte(content), 0644); err != nil {
 		t.Fatalf("write file: %v", err)
@@ -56,6 +59,9 @@ exclude_prefixes:
 	}
 	if len(cfg.ExcludePrefixes) != 1 {
 		t.Fatalf("expected 1 exclude_prefix, got %d", len(cfg.ExcludePrefixes))
+	}
+	if len(cfg.PublicBucketAllowlistPatterns) != 2 {
+		t.Fatalf("expected 2 public_bucket_allowlist_patterns, got %d", len(cfg.PublicBucketAllowlistPatterns))
 	}
 }
 

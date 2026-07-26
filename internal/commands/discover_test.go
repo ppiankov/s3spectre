@@ -30,6 +30,42 @@ func TestDiscoverFlagDefaults(t *testing.T) {
 	if discoverCmd.Flags().Lookup("format").DefValue != "text" {
 		t.Fatalf("expected flag default format text, got %q", discoverCmd.Flags().Lookup("format").DefValue)
 	}
+	if discoverCmd.Flags().Lookup("estimate-cost").DefValue != "false" {
+		t.Fatalf("expected flag default estimate-cost false, got %q", discoverCmd.Flags().Lookup("estimate-cost").DefValue)
+	}
+	if discoverCmd.Flags().Lookup("suggest-lifecycle-policy").DefValue != "false" {
+		t.Fatalf("expected flag default suggest-lifecycle-policy false, got %q", discoverCmd.Flags().Lookup("suggest-lifecycle-policy").DefValue)
+	}
+}
+
+// TestRunDiscover_ConfigWiring verifies the analyzer.DiscoveryConfig built in
+// runDiscover carries the new flags/config fields through correctly. Kept as
+// a direct construction test (mirroring the shape runDiscover builds) since
+// runDiscover itself requires a live AWS client and isn't unit-testable.
+func TestRunDiscover_ConfigWiring(t *testing.T) {
+	origCfg := cfg
+	origSuggest := discoverFlags.suggestLifecycle
+	origEstimate := discoverFlags.estimateCost
+	t.Cleanup(func() {
+		cfg = origCfg
+		discoverFlags.suggestLifecycle = origSuggest
+		discoverFlags.estimateCost = origEstimate
+	})
+
+	cfg.PublicBucketAllowlistPatterns = []string{"my-custom-pattern"}
+	discoverFlags.suggestLifecycle = true
+	discoverFlags.estimateCost = true
+
+	config := buildDiscoveryConfig()
+	if len(config.PublicBucketAllowlistPatterns) != 1 || config.PublicBucketAllowlistPatterns[0] != "my-custom-pattern" {
+		t.Fatalf("expected config allowlist patterns to wire through, got %v", config.PublicBucketAllowlistPatterns)
+	}
+	if !config.SuggestLifecyclePolicy {
+		t.Fatal("expected SuggestLifecyclePolicy to wire through from the flag")
+	}
+	if !config.EstimateCost {
+		t.Fatal("expected EstimateCost to wire through from the flag")
+	}
 }
 
 func TestApplyConfigToDiscoverFlags_RiskThreshold(t *testing.T) {

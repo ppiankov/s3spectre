@@ -135,8 +135,11 @@ func (r *SpectreHubReporter) GenerateDiscovery(data DiscoveryData) error {
 			"region":          bucket.Region,
 			"recommendations": bucket.Recommendations,
 		}
-		if bucket.EstimatedMonthlyCostUSD > 0 {
-			metadata["estimated_monthly_cost_usd"] = bucket.EstimatedMonthlyCostUSD
+		if c := bucket.CostUSD(); c > 0 {
+			metadata["estimated_monthly_cost_usd"] = c
+		}
+		if bucket.LifecyclePolicySuggestion != nil {
+			metadata["lifecycle_policy_suggestion"] = bucket.LifecyclePolicySuggestion
 		}
 		envelope.Findings = append(envelope.Findings, spectreFinding{
 			ID:       string(bucket.Status),

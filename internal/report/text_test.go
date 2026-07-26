@@ -9,6 +9,7 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/ppiankov/s3spectre/internal/analyzer"
+	"github.com/ppiankov/s3spectre/internal/remediation"
 	"github.com/ppiankov/s3spectre/internal/s3"
 )
 
@@ -398,5 +399,127 @@ func TestTextReporter_EstimatedCost_OmittedWhenZero(t *testing.T) {
 	out := buf.String()
 	if strings.Contains(out, "Estimated Cost") {
 		t.Fatalf("expected no estimated-cost line when EstimateCost is off, got: %s", out)
+	}
+}
+
+func TestTextReporter_PublicBucketsInventory(t *testing.T) {
+	setNoColor(t)
+	var buf bytes.Buffer
+	reporter := NewTextReporter(&buf)
+
+	data := DiscoveryData{
+		Tool: "s3spectre",
+		Summary: analyzer.DiscoverySummary{
+			TotalBuckets:  1,
+			PublicBuckets: []string{"allowlisted-public"},
+		},
+		Buckets: map[string]*analyzer.BucketDiscovery{
+			"allowlisted-public": {Name: "allowlisted-public", Status: analyzer.StatusOK, Region: "us-east-1"},
+		},
+	}
+
+	if err := reporter.GenerateDiscovery(data); err != nil {
+		t.Fatalf("GenerateDiscovery failed: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "Public Buckets") || !strings.Contains(out, "allowlisted-public") {
+		t.Fatalf("expected Public Buckets inventory section, got: %s", out)
+	}
+}
+
+func TestTextReporter_LifecycleSuggestion_ShownWhenPresent(t *testing.T) {
+	setNoColor(t)
+	var buf bytes.Buffer
+	reporter := NewTextReporter(&buf)
+
+	data := DiscoveryData{
+		Tool: "s3spectre",
+		Summary: analyzer.DiscoverySummary{
+			TotalBuckets:  1,
+			VersionSprawl: []string{"sprawling"},
+		},
+		Buckets: map[string]*analyzer.BucketDiscovery{
+			"sprawling": {
+				Name:   "sprawling",
+				Status: analyzer.StatusVersionSprawl,
+				Region: "us-east-1",
+				LifecyclePolicySuggestion: &remediation.LifecyclePolicySuggestion{
+					JSON:      `{"Rules":[]}`,
+					Terraform: `resource "aws_s3_bucket_lifecycle_configuration" "sprawling" {}`,
+				},
+			},
+		},
+	}
+
+	if err := reporter.GenerateDiscovery(data); err != nil {
+		t.Fatalf("GenerateDiscovery failed: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "Suggested lifecycle rule") {
+		t.Fatalf("expected lifecycle suggestion block, got: %s", out)
+	}
+}
+
+func TestTextReporter_EstimatedStorageCost_ShownForUnusedBucket(t *testing.T) {
+	setNoColor(t)
+	var buf bytes.Buffer
+	reporter := NewTextReporter(&buf)
+
+	data := DiscoveryData{
+		Tool: "s3spectre",
+		Summary: analyzer.DiscoverySummary{
+			TotalBuckets:  1,
+			UnusedBuckets: []string{"empty-and-old"},
+		},
+		Buckets: map[string]*analyzer.BucketDiscovery{
+			"empty-and-old": {
+				Name:                    "empty-and-old",
+				Status:                  analyzer.StatusUnusedBucket,
+				Region:                  "us-east-1",
+				EstimatedStorageCostUSD: 2.10,
+			},
+		},
+	}
+
+	if err := reporter.GenerateDiscovery(data); err != nil {
+		t.Fatalf("GenerateDiscovery failed: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "Estimated Storage Cost") || !strings.Contains(out, "$2.10/month") {
+		t.Fatalf("expected estimated storage cost line for unused bucket, got: %s", out)
+	}
+}
+
+func TestTextReporter_EstimatedStorageCost_ShownForInactiveBucket(t *testing.T) {
+	setNoColor(t)
+	var buf bytes.Buffer
+	reporter := NewTextReporter(&buf)
+
+	data := DiscoveryData{
+		Tool: "s3spectre",
+		Summary: analyzer.DiscoverySummary{
+			TotalBuckets:    1,
+			InactiveBuckets: []string{"stale"},
+		},
+		Buckets: map[string]*analyzer.BucketDiscovery{
+			"stale": {
+				Name:                    "stale",
+				Status:                  analyzer.StatusInactive,
+				Region:                  "us-east-1",
+				EstimatedStorageCostUSD: 3.45,
+			},
+		},
+	}
+
+	if err := reporter.GenerateDiscovery(data); err != nil {
+		t.Fatalf("GenerateDiscovery failed: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "Estimated Storage Cost") || !strings.Contains(out, "$3.45/month") {
+		t.Fatalf("expected estimated storage cost line for inactive bucket, got: %s", out)
 	}
 }

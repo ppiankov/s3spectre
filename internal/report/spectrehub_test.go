@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ppiankov/s3spectre/internal/analyzer"
+	"github.com/ppiankov/s3spectre/internal/remediation"
 )
 
 func TestSpectreHubReporter_Generate(t *testing.T) {
@@ -135,6 +136,68 @@ func TestSpectreHubReporter_GenerateDiscovery(t *testing.T) {
 	}
 	if envelope.Summary.Total != 1 || envelope.Summary.High != 1 {
 		t.Errorf("summary = total=%d high=%d, want 1/1", envelope.Summary.Total, envelope.Summary.High)
+	}
+}
+
+// TestSpectreHubReporter_GenerateDiscovery_LifecycleSuggestionAndStorageCost
+// guards WO-43/WO-44 wiring into the SpectreHub metadata envelope: a
+// lifecycle suggestion and an inactive-bucket storage cost estimate must
+// both surface in the finding's metadata.
+func TestSpectreHubReporter_GenerateDiscovery_LifecycleSuggestionAndStorageCost(t *testing.T) {
+	data := DiscoveryData{
+		Tool:    "s3spectre",
+		Version: "0.4.0",
+		Summary: analyzer.DiscoverySummary{TotalBuckets: 2},
+		Buckets: map[string]*analyzer.BucketDiscovery{
+			"sprawling-bucket": {
+				Name:      "sprawling-bucket",
+				Status:    analyzer.StatusVersionSprawl,
+				RiskScore: 30,
+				LifecyclePolicySuggestion: &remediation.LifecyclePolicySuggestion{
+					JSON:      `{"Rules":[]}`,
+					Terraform: `resource "aws_s3_bucket_lifecycle_configuration" "sprawling_bucket" {}`,
+				},
+			},
+			"inactive-bucket": {
+				Name:                    "inactive-bucket",
+				Status:                  analyzer.StatusInactive,
+				RiskScore:               100,
+				EstimatedStorageCostUSD: 12.5,
+			},
+		},
+	}
+
+	var buf bytes.Buffer
+	r := NewSpectreHubReporter(&buf)
+	if err := r.GenerateDiscovery(data); err != nil {
+		t.Fatalf("GenerateDiscovery: %v", err)
+	}
+
+	var envelope spectreEnvelope
+	if err := json.Unmarshal(buf.Bytes(), &envelope); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	byLocation := map[string]spectreFinding{}
+	for _, f := range envelope.Findings {
+		byLocation[f.Location] = f
+	}
+
+	sprawl, ok := byLocation["sprawling-bucket"]
+	if !ok {
+		t.Fatal("expected a finding for sprawling-bucket")
+	}
+	if sprawl.Metadata["lifecycle_policy_suggestion"] == nil {
+		t.Error("expected lifecycle_policy_suggestion in metadata for a version-sprawl finding with a suggestion attached")
+	}
+
+	inactive, ok := byLocation["inactive-bucket"]
+	if !ok {
+		t.Fatal("expected a finding for inactive-bucket")
+	}
+	cost, ok := inactive.Metadata["estimated_monthly_cost_usd"].(float64)
+	if !ok || cost != 12.5 {
+		t.Errorf("expected estimated_monthly_cost_usd=12.5 (from EstimatedStorageCostUSD via CostUSD()), got %v", inactive.Metadata["estimated_monthly_cost_usd"])
 	}
 }
 

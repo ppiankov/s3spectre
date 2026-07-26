@@ -74,6 +74,7 @@ func (r *MarkdownReporter) GenerateDiscovery(data DiscoveryData) error {
 	writeMarkdownCountRow(r.writer, "Inactive", len(data.Summary.InactiveBuckets))
 	writeMarkdownCountRow(r.writer, "Version Sprawl", len(data.Summary.VersionSprawl))
 	writeMarkdownCountRow(r.writer, "Versioned Buckets", len(data.Summary.VersionedBuckets))
+	writeMarkdownCountRow(r.writer, "Public Buckets", len(data.Summary.PublicBuckets))
 	fmt.Fprintf(r.writer, "\n")
 
 	risky := append([]string(nil), data.Summary.RiskyBuckets...)
@@ -82,7 +83,9 @@ func (r *MarkdownReporter) GenerateDiscovery(data DiscoveryData) error {
 	r.writeDiscoverySection("Unused Buckets", data.Summary.UnusedBuckets, data.Buckets, true)
 	r.writeDiscoverySection("Inactive Buckets", data.Summary.InactiveBuckets, data.Buckets, true)
 	r.writeDiscoverySection("Version Sprawl", data.Summary.VersionSprawl, data.Buckets, true)
+	r.writeLifecycleSuggestions(data.Summary.VersionSprawl, data.Buckets)
 	r.writeNameListSection("Versioned Buckets", data.Summary.VersionedBuckets)
+	r.writeNameListSection("Public Buckets", data.Summary.PublicBuckets)
 
 	return nil
 }
@@ -155,12 +158,34 @@ func (r *MarkdownReporter) writeDiscoverySection(title string, names []string, b
 		}
 		factors := escapeMarkdownTableCell(strings.Join(d.RiskFactors, "; "))
 		cost := ""
-		if d.EstimatedMonthlyCostUSD > 0 {
-			cost = fmt.Sprintf("$%.2f", d.EstimatedMonthlyCostUSD)
+		if c := d.CostUSD(); c > 0 {
+			cost = fmt.Sprintf("$%.2f", c)
 		}
 		fmt.Fprintf(r.writer, "| %s | %s | %d | %s | %s |\n", name, d.Region, d.RiskScore, factors, cost)
 	}
 	fmt.Fprintf(r.writer, "\n")
+}
+
+// writeLifecycleSuggestions renders any --suggest-lifecycle-policy snippets
+// attached to version-sprawl findings as fenced code blocks, since the
+// multi-line JSON/Terraform content doesn't fit the table format used above.
+func (r *MarkdownReporter) writeLifecycleSuggestions(names []string, buckets map[string]*analyzer.BucketDiscovery) {
+	sorted := append([]string(nil), names...)
+	sort.Strings(sorted)
+	printedHeader := false
+	for _, name := range sorted {
+		d := buckets[name]
+		if d == nil || d.LifecyclePolicySuggestion == nil {
+			continue
+		}
+		if !printedHeader {
+			fmt.Fprintf(r.writer, "### Suggested lifecycle rules (review before applying)\n\n")
+			printedHeader = true
+		}
+		fmt.Fprintf(r.writer, "**%s**\n\n", name)
+		fmt.Fprintf(r.writer, "```json\n%s\n```\n\n", d.LifecyclePolicySuggestion.JSON)
+		fmt.Fprintf(r.writer, "```hcl\n%s\n```\n\n", d.LifecyclePolicySuggestion.Terraform)
+	}
 }
 
 func escapeMarkdownTableCell(s string) string {

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ppiankov/s3spectre/internal/analyzer"
+	"github.com/ppiankov/s3spectre/internal/remediation"
 )
 
 func TestMarkdownReporter_Generate_EmptyInput(t *testing.T) {
@@ -117,6 +118,86 @@ func TestMarkdownReporter_GenerateDiscovery_RoundTrip(t *testing.T) {
 	}
 	if strings.Contains(out, "\x1b[") {
 		t.Fatalf("expected no ANSI escape codes, got: %s", out)
+	}
+}
+
+func TestMarkdownReporter_GenerateDiscovery_PublicBucketsAndLifecycleSuggestion(t *testing.T) {
+	var buf bytes.Buffer
+	reporter := NewMarkdownReporter(&buf)
+
+	data := DiscoveryData{
+		Tool: "s3spectre",
+		Summary: analyzer.DiscoverySummary{
+			TotalBuckets:  2,
+			VersionSprawl: []string{"sprawling-bucket"},
+			PublicBuckets: []string{"allowlisted-public"},
+		},
+		Buckets: map[string]*analyzer.BucketDiscovery{
+			"sprawling-bucket": {
+				Name:      "sprawling-bucket",
+				Status:    analyzer.StatusVersionSprawl,
+				RiskScore: 30,
+				LifecyclePolicySuggestion: &remediation.LifecyclePolicySuggestion{
+					JSON:      `{"Rules":[]}`,
+					Terraform: `resource "aws_s3_bucket_lifecycle_configuration" "sprawling_bucket" {}`,
+				},
+			},
+			"allowlisted-public": {
+				Name:      "allowlisted-public",
+				Status:    analyzer.StatusOK,
+				RiskScore: 30,
+			},
+		},
+	}
+
+	if err := reporter.GenerateDiscovery(data); err != nil {
+		t.Fatalf("GenerateDiscovery failed: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "## Public Buckets") || !strings.Contains(out, "allowlisted-public") {
+		t.Fatalf("expected Public Buckets inventory section, got: %s", out)
+	}
+	if !strings.Contains(out, "Suggested lifecycle rules") {
+		t.Fatalf("expected lifecycle suggestion section header, got: %s", out)
+	}
+	if !strings.Contains(out, "```json") || !strings.Contains(out, "```hcl") {
+		t.Fatalf("expected fenced JSON and HCL code blocks, got: %s", out)
+	}
+}
+
+// TestMarkdownReporter_GenerateDiscovery_StorageCostFallbackInTable guards
+// against the "Cost/mo" column only ever showing version-sprawl overhead
+// cost; an Inactive/Unused bucket's EstimatedStorageCostUSD must also render
+// via the CostUSD() fallback.
+func TestMarkdownReporter_GenerateDiscovery_StorageCostFallbackInTable(t *testing.T) {
+	var buf bytes.Buffer
+	reporter := NewMarkdownReporter(&buf)
+
+	data := DiscoveryData{
+		Tool: "s3spectre",
+		Summary: analyzer.DiscoverySummary{
+			TotalBuckets:    1,
+			InactiveBuckets: []string{"stale-archive"},
+		},
+		Buckets: map[string]*analyzer.BucketDiscovery{
+			"stale-archive": {
+				Name:                    "stale-archive",
+				Status:                  analyzer.StatusInactive,
+				Region:                  "us-east-1",
+				RiskScore:               100,
+				EstimatedStorageCostUSD: 7.89,
+			},
+		},
+	}
+
+	if err := reporter.GenerateDiscovery(data); err != nil {
+		t.Fatalf("GenerateDiscovery failed: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "$7.89") {
+		t.Fatalf("expected storage cost to render in the Inactive Buckets table via CostUSD() fallback, got: %s", out)
 	}
 }
 

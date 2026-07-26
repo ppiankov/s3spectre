@@ -328,6 +328,12 @@ func (r *TextReporter) printDiscoverySummary(summary analyzer.DiscoverySummary) 
 			len(summary.VersionedBuckets))
 	}
 
+	if len(summary.PublicBuckets) > 0 {
+		_, _ = fmt.Fprintf(r.writer, "%s: %d\n",
+			color.CyanString("Public Buckets"),
+			len(summary.PublicBuckets))
+	}
+
 	_, _ = fmt.Fprintf(r.writer, "\n")
 }
 
@@ -385,6 +391,9 @@ func (r *TextReporter) printDiscoveryFindings(buckets map[string]*analyzer.Bucke
 					_, _ = fmt.Fprintf(r.writer, "      - %s\n", rec)
 				}
 			}
+			if c := discovery.CostUSD(); c > 0 {
+				_, _ = fmt.Fprintf(r.writer, "    Estimated Storage Cost (approximate): $%.2f/month\n", c)
+			}
 			_, _ = fmt.Fprintf(r.writer, "\n")
 		}
 	}
@@ -406,6 +415,9 @@ func (r *TextReporter) printDiscoveryFindings(buckets map[string]*analyzer.Bucke
 				for _, factor := range discovery.RiskFactors {
 					_, _ = fmt.Fprintf(r.writer, "      - %s\n", factor)
 				}
+			}
+			if c := discovery.CostUSD(); c > 0 {
+				_, _ = fmt.Fprintf(r.writer, "    Estimated Storage Cost (approximate): $%.2f/month\n", c)
 			}
 			_, _ = fmt.Fprintf(r.writer, "\n")
 		}
@@ -446,6 +458,17 @@ func (r *TextReporter) printDiscoveryFindings(buckets map[string]*analyzer.Bucke
 				_, _ = fmt.Fprintf(r.writer, "    Factors:\n")
 				for _, factor := range discovery.RiskFactors {
 					_, _ = fmt.Fprintf(r.writer, "      - %s\n", factor)
+				}
+			}
+			if discovery.LifecyclePolicySuggestion != nil {
+				_, _ = fmt.Fprintf(r.writer, "    Suggested lifecycle rule (review before applying):\n")
+				_, _ = fmt.Fprintf(r.writer, "      JSON:\n")
+				for _, line := range strings.Split(discovery.LifecyclePolicySuggestion.JSON, "\n") {
+					_, _ = fmt.Fprintf(r.writer, "        %s\n", line)
+				}
+				_, _ = fmt.Fprintf(r.writer, "      Terraform:\n")
+				for _, line := range strings.Split(discovery.LifecyclePolicySuggestion.Terraform, "\n") {
+					_, _ = fmt.Fprintf(r.writer, "        %s\n", line)
 				}
 			}
 			_, _ = fmt.Fprintf(r.writer, "\n")
@@ -500,6 +523,24 @@ func (r *TextReporter) printDiscoveryFindings(buckets map[string]*analyzer.Bucke
 				region = discovery.Region
 			}
 			_, _ = fmt.Fprintf(r.writer, "  %s: %s (%s)\n", color.CyanString("[VERSIONED]"), bucket, region)
+		}
+		_, _ = fmt.Fprintf(r.writer, "\n")
+	}
+
+	// Print public buckets inventory (informational, not a severity finding --
+	// lists every public bucket regardless of naming-allowlist status, so an
+	// allowlisted bucket is never silently dropped from evidence).
+	if len(summary.PublicBuckets) > 0 {
+		_, _ = fmt.Fprintf(r.writer, "%s\n", color.CyanString("Public Buckets: %d", len(summary.PublicBuckets)))
+		_, _ = fmt.Fprintf(r.writer, "%s\n", strings.Repeat("-", 70))
+		sort.Strings(summary.PublicBuckets)
+		for _, bucket := range summary.PublicBuckets {
+			discovery := buckets[bucket]
+			region := ""
+			if discovery != nil {
+				region = discovery.Region
+			}
+			_, _ = fmt.Fprintf(r.writer, "  %s: %s (%s)\n", color.CyanString("[PUBLIC]"), bucket, region)
 		}
 		_, _ = fmt.Fprintf(r.writer, "\n")
 	}

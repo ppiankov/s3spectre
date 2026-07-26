@@ -225,8 +225,11 @@ func TestAnalyzeBucketDiscovery_EncryptionCheckDisabled(t *testing.T) {
 }
 
 func TestAnalyzeBucketDiscovery_PublicAccessFactor(t *testing.T) {
+	// Name deliberately avoids any public-bucket-allowlist pattern (e.g.
+	// "public", "webview", "-cdn", "-landing") so this test exercises the
+	// raw, non-allowlisted scoring path.
 	info := &s3.BucketInfo{
-		Name:         "public",
+		Name:         "customer-records",
 		PublicAccess: &s3.PublicAccessInfo{IsPublic: true},
 	}
 	config := DiscoveryConfig{CheckPublicAccess: true, RiskScoreThreshold: 100}
@@ -483,5 +486,263 @@ func TestAnalyzeBucketDiscovery_EstimateCost_OffByDefault(t *testing.T) {
 
 	if d.EstimatedMonthlyCostUSD != 0 {
 		t.Fatalf("expected no cost estimate when EstimateCost is off, got %v", d.EstimatedMonthlyCostUSD)
+	}
+}
+
+// TestAnalyzeBucketDiscovery_PublicAccess_AllowlistedNameReducedScore guards
+// against a bucket whose name suggests intentionally-public content (e.g.
+// *-web-public) contributing full severity, drowning out genuine
+// misconfigurations found elsewhere in the account.
+func TestAnalyzeBucketDiscovery_PublicAccess_AllowlistedNameReducedScore(t *testing.T) {
+	info := &s3.BucketInfo{
+		Name:         "myapp-web-public",
+		PublicAccess: &s3.PublicAccessInfo{IsPublic: true},
+	}
+	config := DiscoveryConfig{CheckPublicAccess: true, RiskScoreThreshold: 100}
+
+	d := analyzeBucketDiscovery(info, config)
+
+	if d.RiskScore != 30 {
+		t.Fatalf("expected reduced risk score 30 for an allowlisted public bucket name, got %d", d.RiskScore)
+	}
+}
+
+// TestAnalyzeBucketDiscovery_PublicAccess_NonAllowlistedNameFullScore
+// confirms the allowlist reduction is scoped to matching names only; a
+// bucket with no naming signal keeps the full 60-point severity.
+func TestAnalyzeBucketDiscovery_PublicAccess_NonAllowlistedNameFullScore(t *testing.T) {
+	info := &s3.BucketInfo{
+		Name:         "internal-recommendation-service",
+		PublicAccess: &s3.PublicAccessInfo{IsPublic: true},
+	}
+	config := DiscoveryConfig{CheckPublicAccess: true, RiskScoreThreshold: 100}
+
+	d := analyzeBucketDiscovery(info, config)
+
+	if d.RiskScore != 60 {
+		t.Fatalf("expected full risk score 60 for a non-allowlisted public bucket, got %d", d.RiskScore)
+	}
+}
+
+func TestAnalyzeBucketDiscovery_PublicAccess_ConfigAllowlistPattern(t *testing.T) {
+	info := &s3.BucketInfo{
+		Name:         "acme-static-assets",
+		PublicAccess: &s3.PublicAccessInfo{IsPublic: true},
+	}
+	config := DiscoveryConfig{
+		CheckPublicAccess:             true,
+		RiskScoreThreshold:            100,
+		PublicBucketAllowlistPatterns: []string{"static-assets"},
+	}
+
+	d := analyzeBucketDiscovery(info, config)
+
+	if d.RiskScore != 30 {
+		t.Fatalf("expected reduced risk score 30 for a config-supplied allowlist pattern match, got %d", d.RiskScore)
+	}
+}
+
+// TestAnalyzeDiscovery_PublicBucketInventory_IncludesAllowlistedBuckets
+// guards against the naming allowlist silently dropping a bucket from
+// evidence -- reduced severity must not mean invisible.
+func TestAnalyzeDiscovery_PublicBucketInventory_IncludesAllowlistedBuckets(t *testing.T) {
+	buckets := map[string]*s3.BucketInfo{
+		"allowlisted-web-public": {
+			Name:         "allowlisted-web-public",
+			PublicAccess: &s3.PublicAccessInfo{IsPublic: true},
+		},
+		"not-public": {
+			Name:         "not-public",
+			PublicAccess: &s3.PublicAccessInfo{IsPublic: false},
+		},
+	}
+
+	result := AnalyzeDiscovery(buckets, DiscoveryConfig{CheckPublicAccess: true, RiskScoreThreshold: 100})
+
+	if len(result.Summary.PublicBuckets) != 1 || result.Summary.PublicBuckets[0] != "allowlisted-web-public" {
+		t.Fatalf("expected allowlisted public bucket in PublicBuckets inventory regardless of reduced severity, got %v", result.Summary.PublicBuckets)
+	}
+}
+
+// TestAnalyzeDiscovery_PublicBucketInventory_PopulatedIndependentOfCheckFlag
+// mirrors the VersionedBuckets design: the inventory is evidence, populated
+// whenever the underlying data says public, not gated by whether the
+// operator asked for scoring via --check-public.
+func TestAnalyzeDiscovery_PublicBucketInventory_PopulatedIndependentOfCheckFlag(t *testing.T) {
+	buckets := map[string]*s3.BucketInfo{
+		"public-bucket": {
+			Name:         "public-bucket",
+			PublicAccess: &s3.PublicAccessInfo{IsPublic: true},
+		},
+	}
+
+	result := AnalyzeDiscovery(buckets, DiscoveryConfig{CheckPublicAccess: false, RiskScoreThreshold: 100})
+
+	if len(result.Summary.PublicBuckets) != 1 {
+		t.Fatalf("expected public bucket in inventory even when CheckPublicAccess scoring is disabled, got %v", result.Summary.PublicBuckets)
+	}
+	if result.Buckets["public-bucket"].RiskScore != 0 {
+		t.Fatalf("expected no scoring contribution when CheckPublicAccess is disabled, got score %d", result.Buckets["public-bucket"].RiskScore)
+	}
+}
+
+// TestAnalyzeBucketDiscovery_EstimateCost_InactiveBucketStorage guards the
+// WO-43 extension: an inactive bucket's own full storage size should be
+// priced, not just version-sprawl overhead.
+func TestAnalyzeBucketDiscovery_EstimateCost_InactiveBucketStorage(t *testing.T) {
+	info := &s3.BucketInfo{
+		Name:              "stale-archive",
+		Region:            "us-east-1",
+		DaysSinceActivity: 1000,
+		TotalSize:         5 * 1024 * 1024 * 1024,
+	}
+	config := DiscoveryConfig{
+		InactivityThresholdDays: 180,
+		RiskScoreThreshold:      50,
+		EstimateCost:            true,
+	}
+
+	d := analyzeBucketDiscovery(info, config)
+
+	if d.Status != StatusInactive {
+		t.Fatalf("expected status %s, got %s", StatusInactive, d.Status)
+	}
+	if d.EstimatedStorageCostUSD <= 0 {
+		t.Fatalf("expected a positive storage cost estimate for an inactive bucket, got %v", d.EstimatedStorageCostUSD)
+	}
+	if d.EstimatedMonthlyCostUSD != 0 {
+		t.Fatalf("expected version-sprawl cost field to stay zero for a non-version-sprawl bucket, got %v", d.EstimatedMonthlyCostUSD)
+	}
+}
+
+func TestAnalyzeBucketDiscovery_EstimateCost_UnusedBucketStorage(t *testing.T) {
+	info := &s3.BucketInfo{
+		Name:              "empty-and-old",
+		Region:            "us-east-1",
+		IsEmpty:           true,
+		DaysSinceActivity: 200,
+		TotalSize:         2 * 1024 * 1024 * 1024,
+	}
+	config := DiscoveryConfig{
+		InactivityThresholdDays: 180,
+		RiskScoreThreshold:      30,
+		EstimateCost:            true,
+	}
+
+	d := analyzeBucketDiscovery(info, config)
+
+	if d.Status != StatusUnusedBucket {
+		t.Fatalf("expected status %s, got %s", StatusUnusedBucket, d.Status)
+	}
+	if d.EstimatedStorageCostUSD <= 0 {
+		t.Fatalf("expected a positive storage cost estimate for an unused bucket, got %v", d.EstimatedStorageCostUSD)
+	}
+}
+
+// TestAnalyzeBucketDiscovery_EstimateCost_NoDoubleCountingWithVersionSprawl
+// guards against a bucket that is BOTH stale AND version-sprawling getting
+// costed under both fields -- a bucket only ever has one Status, so only
+// one cost field should ever populate for it.
+func TestAnalyzeBucketDiscovery_EstimateCost_NoDoubleCountingWithVersionSprawl(t *testing.T) {
+	info := &s3.BucketInfo{
+		Name:              "sprawling-and-stale",
+		Region:            "us-east-1",
+		DaysSinceActivity: 1000,
+		VersioningEnabled: true,
+		LifecycleRules:    0,
+		TotalSize:         1 * 1024 * 1024 * 1024,
+		TotalVersionSize:  11 * 1024 * 1024 * 1024,
+	}
+	config := DiscoveryConfig{
+		InactivityThresholdDays: 180,
+		RiskScoreThreshold:      50,
+		EstimateCost:            true,
+	}
+
+	d := analyzeBucketDiscovery(info, config)
+
+	if d.Status != StatusVersionSprawl {
+		t.Fatalf("expected VersionSprawl to take precedence in status classification, got %s", d.Status)
+	}
+	if d.EstimatedMonthlyCostUSD <= 0 {
+		t.Fatalf("expected version-sprawl overhead cost to be populated, got %v", d.EstimatedMonthlyCostUSD)
+	}
+	if d.EstimatedStorageCostUSD != 0 {
+		t.Fatalf("expected no storage cost field populated for a version-sprawl-classified bucket (avoid double counting), got %v", d.EstimatedStorageCostUSD)
+	}
+}
+
+// TestAnalyzeBucketDiscovery_EstimateCost_NoDoubleCountingWhenUnusedWinsClassification
+// guards a narrower variant of the double-counting bug: the version-sprawl
+// raw condition (VersioningEnabled && LifecycleRules == 0) triggers
+// EstimatedMonthlyCostUSD independent of the bucket's final Status. When the
+// bucket is ALSO empty and stale enough to classify as UnusedBucket (which
+// the status switch checks before VersionSprawl), a naive Status-only guard
+// on EstimatedStorageCostUSD would populate BOTH cost fields for the same
+// bucket. Caught by independent review; regression-tests the fix directly.
+func TestAnalyzeBucketDiscovery_EstimateCost_NoDoubleCountingWhenUnusedWinsClassification(t *testing.T) {
+	info := &s3.BucketInfo{
+		Name:              "empty-sprawl-and-stale",
+		Region:            "us-east-1",
+		IsEmpty:           true,
+		DaysSinceActivity: 1000,
+		VersioningEnabled: true,
+		LifecycleRules:    0,
+		TotalSize:         1 * 1024 * 1024 * 1024,
+		TotalVersionSize:  11 * 1024 * 1024 * 1024,
+	}
+	config := DiscoveryConfig{
+		InactivityThresholdDays: 180,
+		RiskScoreThreshold:      50,
+		EstimateCost:            true,
+	}
+
+	d := analyzeBucketDiscovery(info, config)
+
+	if d.Status != StatusUnusedBucket {
+		t.Fatalf("expected UnusedBucket to take precedence in status classification, got %s", d.Status)
+	}
+	if d.EstimatedMonthlyCostUSD <= 0 {
+		t.Fatalf("expected version-sprawl overhead cost to still be populated (raw condition is Status-independent), got %v", d.EstimatedMonthlyCostUSD)
+	}
+	if d.EstimatedStorageCostUSD != 0 {
+		t.Fatalf("expected NO storage cost field populated when the overhead cost already covers this bucket, got %v (this was the double-counting bug)", d.EstimatedStorageCostUSD)
+	}
+}
+
+func TestBucketDiscovery_CostUSD_PrefersVersionSprawlField(t *testing.T) {
+	d := &BucketDiscovery{EstimatedMonthlyCostUSD: 5, EstimatedStorageCostUSD: 10}
+	if got := d.CostUSD(); got != 5 {
+		t.Fatalf("expected CostUSD to prefer EstimatedMonthlyCostUSD, got %v", got)
+	}
+}
+
+func TestBucketDiscovery_CostUSD_FallsBackToStorageField(t *testing.T) {
+	d := &BucketDiscovery{EstimatedStorageCostUSD: 10}
+	if got := d.CostUSD(); got != 10 {
+		t.Fatalf("expected CostUSD to fall back to EstimatedStorageCostUSD, got %v", got)
+	}
+}
+
+// TestAnalyzeBucketDiscovery_LifecycleSuggestion_OnlyWhenEnabledAndSprawling
+// guards the opt-in flag: no suggestion attached unless both the flag is on
+// and the bucket is a genuine version-sprawl finding.
+func TestAnalyzeBucketDiscovery_LifecycleSuggestion_OnlyWhenEnabledAndSprawling(t *testing.T) {
+	sprawling := &s3.BucketInfo{Name: "sprawling", VersioningEnabled: true, LifecycleRules: 0}
+
+	withFlag := analyzeBucketDiscovery(sprawling, DiscoveryConfig{RiskScoreThreshold: 100, SuggestLifecyclePolicy: true})
+	if withFlag.LifecyclePolicySuggestion == nil {
+		t.Fatal("expected a lifecycle suggestion for a version-sprawl bucket when the flag is enabled")
+	}
+
+	withoutFlag := analyzeBucketDiscovery(sprawling, DiscoveryConfig{RiskScoreThreshold: 100, SuggestLifecyclePolicy: false})
+	if withoutFlag.LifecyclePolicySuggestion != nil {
+		t.Fatal("expected no lifecycle suggestion when the flag is disabled (opt-in must be off by default)")
+	}
+
+	healthy := &s3.BucketInfo{Name: "healthy"}
+	healthyResult := analyzeBucketDiscovery(healthy, DiscoveryConfig{RiskScoreThreshold: 100, SuggestLifecyclePolicy: true})
+	if healthyResult.LifecyclePolicySuggestion != nil {
+		t.Fatal("expected no lifecycle suggestion for a bucket with no version-sprawl finding")
 	}
 }
