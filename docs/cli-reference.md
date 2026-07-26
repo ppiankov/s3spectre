@@ -50,6 +50,7 @@ timeout: 5m
 | `stale_days` | scan | Default for `--stale-days` |
 | `format` | scan, discover | Default for `--format` |
 | `timeout` | scan, discover | Default for `--timeout` |
+| `risk_threshold` | discover | Default for `--risk-threshold` |
 
 
 ## Usage
@@ -127,6 +128,7 @@ s3spectre discover --fail-on-unused --fail-on-risky --format json
 | `--regions` | | Specific regions (comma-separated) |
 | `--age-threshold-days` | `365` | Flag buckets older than N days |
 | `--inactive-days` | `180` | Flag buckets inactive for N days |
+| `--risk-threshold` | `100` | Risk score at which a bucket is flagged unused/risky/inactive |
 | `--check-encryption` | `false` | Flag missing encryption |
 | `--check-public` | `false` | Flag public access |
 | `--concurrency` | `10` | Max concurrent S3 API calls |

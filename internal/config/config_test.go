@@ -24,6 +24,7 @@ func TestLoad_ValidYAML(t *testing.T) {
 stale_days: 30
 format: json
 timeout: 5m
+risk_threshold: 60
 exclude_buckets:
   - temp-bucket
   - test-bucket
@@ -43,6 +44,9 @@ exclude_prefixes:
 	}
 	if cfg.StaleDays != 30 {
 		t.Fatalf("expected stale_days 30, got %d", cfg.StaleDays)
+	}
+	if cfg.RiskThreshold != 60 {
+		t.Fatalf("expected risk_threshold 60, got %d", cfg.RiskThreshold)
 	}
 	if cfg.Format != "json" {
 		t.Fatalf("expected format json, got %q", cfg.Format)

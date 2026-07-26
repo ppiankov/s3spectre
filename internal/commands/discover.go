@@ -23,6 +23,7 @@ var discoverFlags struct {
 	regions          []string
 	ageThresholdDays int
 	inactiveDays     int
+	riskThreshold    int
 	checkEncryption  bool
 	checkPublic      bool
 	maxConcurrency   int
@@ -51,6 +52,7 @@ func init() {
 	discoverCmd.Flags().StringSliceVar(&discoverFlags.regions, "regions", nil, "Specific regions to scan (comma-separated)")
 	discoverCmd.Flags().IntVar(&discoverFlags.ageThresholdDays, "age-threshold-days", 365, "Buckets older than X days are flagged")
 	discoverCmd.Flags().IntVar(&discoverFlags.inactiveDays, "inactive-days", 180, "No activity for X days is flagged")
+	discoverCmd.Flags().IntVar(&discoverFlags.riskThreshold, "risk-threshold", 100, "Risk score (0-100+) at which a bucket is flagged unused/risky/inactive")
 	discoverCmd.Flags().BoolVar(&discoverFlags.checkEncryption, "check-encryption", false, "Check for missing encryption")
 	discoverCmd.Flags().BoolVar(&discoverFlags.checkPublic, "check-public", false, "Check for public access")
 	discoverCmd.Flags().IntVar(&discoverFlags.maxConcurrency, "concurrency", 10, "Max concurrent S3 API calls")
@@ -125,7 +127,7 @@ func runDiscover(cmd *cobra.Command, args []string) error {
 		InactivityThresholdDays: discoverFlags.inactiveDays,
 		CheckEncryption:         discoverFlags.checkEncryption,
 		CheckPublicAccess:       discoverFlags.checkPublic,
-		RiskScoreThreshold:      100, // Default threshold
+		RiskScoreThreshold:      discoverFlags.riskThreshold,
 	}
 	results := analyzer.AnalyzeDiscovery(buckets, config)
 
@@ -222,4 +224,7 @@ func runDiscover(cmd *cobra.Command, args []string) error {
 
 func applyConfigToDiscoverFlags(cmd *cobra.Command) {
 	applyCommonConfigDefaults(cmd, &discoverFlags.awsRegion, &discoverFlags.outputFormat, &discoverFlags.timeout)
+	if !cmd.Flags().Lookup("risk-threshold").Changed && cfg.RiskThreshold > 0 {
+		discoverFlags.riskThreshold = cfg.RiskThreshold
+	}
 }

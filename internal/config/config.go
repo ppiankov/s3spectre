@@ -21,6 +21,7 @@ type Config struct {
 	StaleDays       int      `yaml:"stale_days"`
 	Format          string   `yaml:"format"`
 	Timeout         string   `yaml:"timeout"`
+	RiskThreshold   int      `yaml:"risk_threshold"`
 }
 
 // TimeoutDuration parses the Timeout field as a Go duration.

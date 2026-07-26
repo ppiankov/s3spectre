@@ -108,9 +108,17 @@ func analyzeBucketDiscovery(info *s3.BucketInfo, config DiscoveryConfig) *Bucket
 			fmt.Sprintf("Old bucket (%d days)", info.AgeInDays))
 	}
 
-	// Factor 2: Inactivity (50 points if no activity)
+	// Factor 2: Inactivity (50 points base, scaling up for severe staleness so a
+	// multi-year-inactive bucket can surface at the default risk threshold on
+	// this signal alone, instead of requiring an unrelated second factor)
 	if !managed && info.DaysSinceActivity > config.InactivityThresholdDays && config.InactivityThresholdDays > 0 {
-		discovery.RiskScore += 50
+		points := 50
+		if info.DaysSinceActivity > config.InactivityThresholdDays*5 {
+			points = 100
+		} else if info.DaysSinceActivity > config.InactivityThresholdDays*2 {
+			points = 75
+		}
+		discovery.RiskScore += points
 		discovery.RiskFactors = append(discovery.RiskFactors,
 			fmt.Sprintf("No activity for %d days", info.DaysSinceActivity))
 		discovery.Recommendations = append(discovery.Recommendations,

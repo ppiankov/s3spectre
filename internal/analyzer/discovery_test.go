@@ -95,7 +95,49 @@ func TestAnalyzeBucketDiscovery_InactivityFactor(t *testing.T) {
 	d := analyzeBucketDiscovery(info, config)
 
 	if d.RiskScore != 50 {
-		t.Errorf("expected risk score 50 for inactivity, got %d", d.RiskScore)
+		t.Errorf("expected risk score 50 for inactivity just past threshold, got %d", d.RiskScore)
+	}
+}
+
+func TestAnalyzeBucketDiscovery_InactivityFactor_ScalesForModerateStaleness(t *testing.T) {
+	// Between 2x and 5x the threshold: 75 points, still below the default
+	// 100-point threshold on this factor alone.
+	info := &s3.BucketInfo{Name: "stale", DaysSinceActivity: 400}
+	config := DiscoveryConfig{InactivityThresholdDays: 180, RiskScoreThreshold: 100}
+
+	d := analyzeBucketDiscovery(info, config)
+
+	if d.RiskScore != 75 {
+		t.Errorf("expected risk score 75 for moderate staleness (>2x threshold), got %d", d.RiskScore)
+	}
+}
+
+// TestAnalyzeBucketDiscovery_InactivityFactor_SurfacesSevereStaleness guards
+// against multi-year-inactive buckets (real accounts have shown 1000+ days)
+// being silently classified OK because the flat 50-point inactivity signal
+// never alone crosses the default 100-point threshold.
+func TestAnalyzeBucketDiscovery_InactivityFactor_SurfacesSevereStaleness(t *testing.T) {
+	info := &s3.BucketInfo{Name: "ancient", DaysSinceActivity: 1171}
+	config := DiscoveryConfig{InactivityThresholdDays: 180, RiskScoreThreshold: 100}
+
+	d := analyzeBucketDiscovery(info, config)
+
+	if d.RiskScore != 100 {
+		t.Errorf("expected risk score 100 for severe staleness (>5x threshold), got %d", d.RiskScore)
+	}
+	if d.Status == StatusOK {
+		t.Errorf("expected a bucket inactive for 1171 days to not be classified OK at the default threshold")
+	}
+}
+
+func TestAnalyzeBucketDiscovery_RiskThresholdConfigurable(t *testing.T) {
+	info := &s3.BucketInfo{Name: "stale", DaysSinceActivity: 200}
+	config := DiscoveryConfig{InactivityThresholdDays: 180, RiskScoreThreshold: 40}
+
+	d := analyzeBucketDiscovery(info, config)
+
+	if d.Status == StatusOK {
+		t.Errorf("expected risk score 50 to cross a lowered threshold of 40, got status %s", d.Status)
 	}
 }
 
