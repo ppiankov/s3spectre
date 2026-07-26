@@ -41,6 +41,22 @@ func xmlResponse(body string) *http.Response {
 	}
 }
 
+func xmlErrorResponse(code, message string) *http.Response {
+	body := `<?xml version="1.0" encoding="UTF-8"?>
+<Error>
+  <Code>` + code + `</Code>
+  <Message>` + message + `</Message>
+  <BucketName>test-bucket</BucketName>
+  <RequestId>req-1</RequestId>
+  <HostId>host-1</HostId>
+</Error>`
+	return &http.Response{
+		StatusCode: http.StatusNotFound,
+		Header:     http.Header{"Content-Type": []string{"application/xml"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+}
+
 func TestInspector_InspectPrefixWithClient(t *testing.T) {
 	listObjectsXML := `<?xml version="1.0" encoding="UTF-8"?>
 <ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
@@ -183,5 +199,108 @@ func TestInspector_InspectPrefixesWithClient(t *testing.T) {
 		if !seen[prefix] {
 			t.Fatalf("missing prefix %s in results", prefix)
 		}
+	}
+}
+
+func TestInspector_FetchEncryption_Enabled(t *testing.T) {
+	encXML := `<?xml version="1.0" encoding="UTF-8"?>
+<ServerSideEncryptionConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+  <Rule>
+    <ApplyServerSideEncryptionByDefault>
+      <SSEAlgorithm>aws:kms</SSEAlgorithm>
+      <KMSMasterKeyID>arn:aws:kms:us-east-1:123456789012:key/abcd</KMSMasterKeyID>
+    </ApplyServerSideEncryptionByDefault>
+  </Rule>
+</ServerSideEncryptionConfiguration>`
+
+	rt := roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		return xmlResponse(encXML), nil
+	})
+	client := newTestClient(t, rt)
+	inspector := NewInspector(client, 1)
+
+	enc := inspector.fetchEncryption(context.Background(), client, "test-bucket")
+	if !enc.Enabled {
+		t.Fatalf("expected encryption enabled")
+	}
+	if enc.Algorithm != "aws:kms" {
+		t.Fatalf("expected algorithm aws:kms, got %q", enc.Algorithm)
+	}
+	if enc.KMSMasterKeyID == "" {
+		t.Fatalf("expected KMS key id to be populated")
+	}
+}
+
+func TestInspector_FetchEncryption_NotConfigured(t *testing.T) {
+	rt := roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		return xmlErrorResponse("ServerSideEncryptionConfigurationNotFoundError", "not found"), nil
+	})
+	client := newTestClient(t, rt)
+	inspector := NewInspector(client, 1)
+
+	enc := inspector.fetchEncryption(context.Background(), client, "test-bucket")
+	if enc == nil {
+		t.Fatalf("expected non-nil EncryptionInfo even when not configured")
+	}
+	if enc.Enabled {
+		t.Fatalf("expected encryption disabled when not configured")
+	}
+}
+
+func TestInspector_FetchPublicAccessBlock_FullyBlocked(t *testing.T) {
+	pabXML := `<?xml version="1.0" encoding="UTF-8"?>
+<PublicAccessBlockConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+  <BlockPublicAcls>true</BlockPublicAcls>
+  <IgnorePublicAcls>true</IgnorePublicAcls>
+  <BlockPublicPolicy>true</BlockPublicPolicy>
+  <RestrictPublicBuckets>true</RestrictPublicBuckets>
+</PublicAccessBlockConfiguration>`
+
+	rt := roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		return xmlResponse(pabXML), nil
+	})
+	client := newTestClient(t, rt)
+	inspector := NewInspector(client, 1)
+
+	pa := inspector.fetchPublicAccessBlock(context.Background(), client, "test-bucket")
+	if pa.IsPublic {
+		t.Fatalf("expected IsPublic=false when all four protections are enabled")
+	}
+}
+
+func TestInspector_FetchPublicAccessBlock_PartiallyBlocked(t *testing.T) {
+	pabXML := `<?xml version="1.0" encoding="UTF-8"?>
+<PublicAccessBlockConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+  <BlockPublicAcls>true</BlockPublicAcls>
+  <IgnorePublicAcls>true</IgnorePublicAcls>
+  <BlockPublicPolicy>false</BlockPublicPolicy>
+  <RestrictPublicBuckets>false</RestrictPublicBuckets>
+</PublicAccessBlockConfiguration>`
+
+	rt := roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		return xmlResponse(pabXML), nil
+	})
+	client := newTestClient(t, rt)
+	inspector := NewInspector(client, 1)
+
+	pa := inspector.fetchPublicAccessBlock(context.Background(), client, "test-bucket")
+	if !pa.IsPublic {
+		t.Fatalf("expected IsPublic=true when block-public-policy and restrict-public-buckets are both off")
+	}
+}
+
+func TestInspector_FetchPublicAccessBlock_NotConfigured(t *testing.T) {
+	rt := roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		return xmlErrorResponse("NoSuchPublicAccessBlockConfiguration", "not found"), nil
+	})
+	client := newTestClient(t, rt)
+	inspector := NewInspector(client, 1)
+
+	pa := inspector.fetchPublicAccessBlock(context.Background(), client, "test-bucket")
+	if !pa.IsPublic {
+		t.Fatalf("expected IsPublic=true when no public-access-block configuration exists at all")
+	}
+	if pa.BlockPublicAcls || pa.IgnorePublicAcls || pa.BlockPublicPolicy || pa.RestrictPublicBuckets {
+		t.Fatalf("expected all four protection flags false when not configured, got %+v", pa)
 	}
 }

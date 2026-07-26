@@ -244,6 +244,8 @@ Ensure your AWS credentials have these permissions:
         "s3:GetBucketVersioning",
         "s3:GetLifecycleConfiguration",
         "s3:GetBucketTagging",
+        "s3:GetEncryptionConfiguration",
+        "s3:GetBucketPublicAccessBlock",
         "s3:ListBucket",
         "ec2:DescribeRegions"
       ],

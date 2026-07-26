@@ -610,12 +610,70 @@ func (i *Inspector) inspectBucketFull(ctx context.Context, bucket, region string
 		return err
 	})
 
+	info.Encryption = i.fetchEncryption(ctx, regionClient, bucket)
+	info.PublicAccess = i.fetchPublicAccessBlock(ctx, regionClient, bucket)
+
 	// For versioned buckets, calculate total version size and count
 	if info.VersioningEnabled {
 		i.calculateVersionSizes(ctx, regionClient, bucket, info)
 	}
 
 	return info
+}
+
+// fetchEncryption retrieves a bucket's default encryption configuration.
+// A "not configured" response is a normal state, not an error: it means
+// Enabled: false.
+func (i *Inspector) fetchEncryption(ctx context.Context, client *Client, bucket string) *EncryptionInfo {
+	enc := &EncryptionInfo{}
+	_ = client.WithRetry(ctx, func() error {
+		encResult, err := client.s3Client.GetBucketEncryption(ctx, &s3.GetBucketEncryptionInput{
+			Bucket: aws.String(bucket),
+		})
+		if err != nil && !strings.Contains(err.Error(), "ServerSideEncryptionConfigurationNotFoundError") {
+			return err
+		}
+		if err == nil && encResult.ServerSideEncryptionConfiguration != nil && len(encResult.ServerSideEncryptionConfiguration.Rules) > 0 {
+			rule := encResult.ServerSideEncryptionConfiguration.Rules[0]
+			if rule.ApplyServerSideEncryptionByDefault != nil {
+				enc.Enabled = true
+				enc.Algorithm = string(rule.ApplyServerSideEncryptionByDefault.SSEAlgorithm)
+				if rule.ApplyServerSideEncryptionByDefault.KMSMasterKeyID != nil {
+					enc.KMSMasterKeyID = *rule.ApplyServerSideEncryptionByDefault.KMSMasterKeyID
+				}
+			}
+		}
+		return nil
+	})
+	return enc
+}
+
+// fetchPublicAccessBlock retrieves a bucket's Block Public Access configuration.
+// A "not configured" response (NoSuchPublicAccessBlockConfiguration) means none
+// of the four protections are in place, which is itself a real exposure risk --
+// IsPublic is true whenever the block configuration is not fully locked down,
+// matching the common CSPM heuristic (flagging incomplete protection coverage
+// rather than requiring proof of an actual public policy/ACL).
+func (i *Inspector) fetchPublicAccessBlock(ctx context.Context, client *Client, bucket string) *PublicAccessInfo {
+	pa := &PublicAccessInfo{}
+	_ = client.WithRetry(ctx, func() error {
+		pabResult, err := client.s3Client.GetPublicAccessBlock(ctx, &s3.GetPublicAccessBlockInput{
+			Bucket: aws.String(bucket),
+		})
+		if err != nil && !strings.Contains(err.Error(), "NoSuchPublicAccessBlockConfiguration") {
+			return err
+		}
+		if err == nil && pabResult.PublicAccessBlockConfiguration != nil {
+			cfg := pabResult.PublicAccessBlockConfiguration
+			pa.BlockPublicAcls = aws.ToBool(cfg.BlockPublicAcls)
+			pa.IgnorePublicAcls = aws.ToBool(cfg.IgnorePublicAcls)
+			pa.BlockPublicPolicy = aws.ToBool(cfg.BlockPublicPolicy)
+			pa.RestrictPublicBuckets = aws.ToBool(cfg.RestrictPublicBuckets)
+		}
+		return nil
+	})
+	pa.IsPublic = !(pa.BlockPublicAcls && pa.IgnorePublicAcls && pa.BlockPublicPolicy && pa.RestrictPublicBuckets)
+	return pa
 }
 
 // calculateVersionSizes calculates total size of all versions in a bucket
