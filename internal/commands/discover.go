@@ -26,6 +26,7 @@ var discoverFlags struct {
 	riskThreshold    int
 	checkEncryption  bool
 	checkPublic      bool
+	estimateCost     bool
 	maxConcurrency   int
 	outputFormat     string
 	outputFile       string
@@ -55,6 +56,7 @@ func init() {
 	discoverCmd.Flags().IntVar(&discoverFlags.riskThreshold, "risk-threshold", 100, "Risk score (0-100+) at which a bucket is flagged unused/risky/inactive")
 	discoverCmd.Flags().BoolVar(&discoverFlags.checkEncryption, "check-encryption", false, "Check for missing encryption")
 	discoverCmd.Flags().BoolVar(&discoverFlags.checkPublic, "check-public", false, "Check for public access")
+	discoverCmd.Flags().BoolVar(&discoverFlags.estimateCost, "estimate-cost", false, "Estimate monthly USD cost of version-sprawl storage overhead (approximate)")
 	discoverCmd.Flags().IntVar(&discoverFlags.maxConcurrency, "concurrency", 10, "Max concurrent S3 API calls")
 	discoverCmd.Flags().StringVarP(&discoverFlags.outputFormat, "format", "f", "text", "Output format: text, json, sarif, or spectrehub")
 	discoverCmd.Flags().StringVarP(&discoverFlags.outputFile, "output", "o", "", "Output file (default: stdout)")
@@ -128,6 +130,7 @@ func runDiscover(cmd *cobra.Command, args []string) error {
 		CheckEncryption:         discoverFlags.checkEncryption,
 		CheckPublicAccess:       discoverFlags.checkPublic,
 		RiskScoreThreshold:      discoverFlags.riskThreshold,
+		EstimateCost:            discoverFlags.estimateCost,
 	}
 	results := analyzer.AnalyzeDiscovery(buckets, config)
 

@@ -3,6 +3,7 @@ package analyzer
 import (
 	"fmt"
 
+	"github.com/ppiankov/s3spectre/internal/pricing"
 	"github.com/ppiankov/s3spectre/internal/s3"
 )
 
@@ -13,6 +14,7 @@ type DiscoveryConfig struct {
 	CheckEncryption         bool
 	CheckPublicAccess       bool
 	RiskScoreThreshold      int
+	EstimateCost            bool
 }
 
 // DiscoveryResult contains discovery analysis results
@@ -30,6 +32,10 @@ type BucketDiscovery struct {
 	RiskFactors     []string       `json:"risk_factors"`
 	Recommendations []string       `json:"recommendations"`
 	BucketInfo      *s3.BucketInfo `json:"bucket_info,omitempty"`
+	// EstimatedMonthlyCostUSD is an approximate monthly cost of the version
+	// overhead (TotalVersionSize minus TotalSize) for a VersionSprawl finding.
+	// Only populated when DiscoveryConfig.EstimateCost is set; 0 otherwise.
+	EstimatedMonthlyCostUSD float64 `json:"estimated_monthly_cost_usd,omitempty"`
 }
 
 // DiscoverySummary contains high-level summary
@@ -156,6 +162,11 @@ func analyzeBucketDiscovery(info *s3.BucketInfo, config DiscoveryConfig) *Bucket
 			"Versioning enabled without lifecycle rules")
 		discovery.Recommendations = append(discovery.Recommendations,
 			"Add lifecycle policy to expire old versions")
+
+		if config.EstimateCost && info.TotalVersionSize > info.TotalSize {
+			overhead := info.TotalVersionSize - info.TotalSize
+			discovery.EstimatedMonthlyCostUSD = pricing.MonthlyStorageCost(overhead, info.Region)
+		}
 	}
 
 	// Factor 6: No encryption (40 points) - if check enabled

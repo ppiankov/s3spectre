@@ -131,6 +131,7 @@ s3spectre discover --fail-on-unused --fail-on-risky --format json
 | `--risk-threshold` | `100` | Risk score at which a bucket is flagged unused/risky/inactive |
 | `--check-encryption` | `false` | Flag missing encryption |
 | `--check-public` | `false` | Flag public access |
+| `--estimate-cost` | `false` | Approximate monthly USD cost of version-sprawl overhead |
 | `--concurrency` | `10` | Max concurrent S3 API calls |
 | `--format, -f` | `text` | Output format: `text` or `json` |
 | `--output, -o` | stdout | Output file |
@@ -204,7 +205,7 @@ Key design decisions:
 
 - **No object-level scanning.** S3Spectre inspects bucket and prefix metadata. It does not list or read individual objects beyond what is needed for prefix existence and staleness checks.
 - **Regex-based code scanning.** The scanner uses pattern matching, not AST parsing. It will miss dynamically constructed bucket names and may produce false positives on commented-out code.
-- **No cost estimation.** The tool identifies unused resources but does not calculate storage costs.
+- **No cost estimation by default.** `discover --estimate-cost` gives an approximate monthly USD figure for version-sprawl storage overhead, using an embedded on-demand pricing table (S3 Standard only, no request/data-transfer charges). Everything else -- unused/inactive bucket findings, scan mode -- remains unpriced.
 - **IAM permissions required.** Needs `s3:ListBucket`, `s3:ListAllMyBuckets`, `s3:GetBucketLocation`, `s3:GetBucketVersioning`, `s3:GetLifecycleConfiguration`, `s3:GetBucketTagging`, `s3:GetEncryptionConfiguration`, and `s3:GetBucketPublicAccessBlock` (the last two only needed for `--check-encryption`/`--check-public`). Missing permissions produce access-denied errors, not silent failures.
 - **No real-time monitoring.** S3Spectre is a point-in-time scanner, not a daemon. Run it in CI or on a schedule.
 - **Single AWS account.** Cross-account scanning is not supported.

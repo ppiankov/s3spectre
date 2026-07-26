@@ -437,6 +437,10 @@ func (r *TextReporter) printDiscoveryFindings(buckets map[string]*analyzer.Bucke
 						float64(overhead)/float64(discovery.BucketInfo.TotalVersionSize)*100)
 				}
 			}
+			if discovery.EstimatedMonthlyCostUSD > 0 {
+				_, _ = fmt.Fprintf(r.writer, "    Estimated Cost (overhead, approximate): $%.2f/month\n",
+					discovery.EstimatedMonthlyCostUSD)
+			}
 
 			if len(discovery.RiskFactors) > 0 {
 				_, _ = fmt.Fprintf(r.writer, "    Factors:\n")

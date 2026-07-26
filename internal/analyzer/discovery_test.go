@@ -447,3 +447,41 @@ func TestAnalyzeDiscovery_VersionedBucketInventory_NoVersioning(t *testing.T) {
 		t.Errorf("expected no versioned-bucket entry for a non-versioned bucket, got %v", result.Summary.VersionedBuckets)
 	}
 }
+
+func TestAnalyzeBucketDiscovery_EstimateCost_ComputesOverheadWhenEnabled(t *testing.T) {
+	info := &s3.BucketInfo{
+		Name:              "sprawling",
+		Region:            "us-east-1",
+		VersioningEnabled: true,
+		LifecycleRules:    0,
+		TotalSize:         1 * 1024 * 1024 * 1024,  // 1 GiB current
+		TotalVersionSize:  11 * 1024 * 1024 * 1024, // 11 GiB across all versions
+	}
+	config := DiscoveryConfig{EstimateCost: true, RiskScoreThreshold: 100}
+
+	d := analyzeBucketDiscovery(info, config)
+
+	if d.EstimatedMonthlyCostUSD <= 0 {
+		t.Fatalf("expected a positive cost estimate for 10 GiB of overhead, got %v", d.EstimatedMonthlyCostUSD)
+	}
+}
+
+// TestAnalyzeBucketDiscovery_EstimateCost_OffByDefault guards against the
+// opt-in flag changing behavior when not explicitly enabled.
+func TestAnalyzeBucketDiscovery_EstimateCost_OffByDefault(t *testing.T) {
+	info := &s3.BucketInfo{
+		Name:              "sprawling",
+		Region:            "us-east-1",
+		VersioningEnabled: true,
+		LifecycleRules:    0,
+		TotalSize:         1 * 1024 * 1024 * 1024,
+		TotalVersionSize:  11 * 1024 * 1024 * 1024,
+	}
+	config := DiscoveryConfig{RiskScoreThreshold: 100} // EstimateCost left false
+
+	d := analyzeBucketDiscovery(info, config)
+
+	if d.EstimatedMonthlyCostUSD != 0 {
+		t.Fatalf("expected no cost estimate when EstimateCost is off, got %v", d.EstimatedMonthlyCostUSD)
+	}
+}

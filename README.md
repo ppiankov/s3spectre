@@ -19,7 +19,7 @@
 - Not a replacement for AWS Config Rules or GuardDuty — not real-time
 - Not a data scanner — never reads object contents, only metadata
 - Not a remediation tool — reports only, never modifies buckets
-- Not a cost calculator — identifies waste, does not estimate dollars
+- Not a cost calculator by default — `--estimate-cost` gives an approximate monthly figure for version-sprawl overhead only, everything else stays unpriced
 
 ## Quick start
 
