@@ -523,3 +523,132 @@ func TestTextReporter_EstimatedStorageCost_ShownForInactiveBucket(t *testing.T) 
 		t.Fatalf("expected estimated storage cost line for inactive bucket, got: %s", out)
 	}
 }
+
+func TestTextReporter_TotalEstimatedCost_ShownWhenPresent(t *testing.T) {
+	setNoColor(t)
+	var buf bytes.Buffer
+	reporter := NewTextReporter(&buf)
+
+	data := DiscoveryData{
+		Tool: "s3spectre",
+		Summary: analyzer.DiscoverySummary{
+			TotalBuckets:          1,
+			TotalEstimatedCostUSD: 11.99,
+		},
+	}
+
+	if err := reporter.GenerateDiscovery(data); err != nil {
+		t.Fatalf("GenerateDiscovery failed: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "Total Estimated Cost") || !strings.Contains(out, "$11.99/month") {
+		t.Fatalf("expected total estimated cost line, got: %s", out)
+	}
+}
+
+func TestTextReporter_TotalEstimatedCost_OmittedWhenZero(t *testing.T) {
+	setNoColor(t)
+	var buf bytes.Buffer
+	reporter := NewTextReporter(&buf)
+
+	data := DiscoveryData{
+		Tool:    "s3spectre",
+		Summary: analyzer.DiscoverySummary{TotalBuckets: 1},
+	}
+
+	if err := reporter.GenerateDiscovery(data); err != nil {
+		t.Fatalf("GenerateDiscovery failed: %v", err)
+	}
+
+	if strings.Contains(buf.String(), "Total Estimated Cost") {
+		t.Fatalf("expected no total-cost line when zero, got: %s", buf.String())
+	}
+}
+
+func TestTextReporter_TagRollup_SortedByRiskScoreDescending(t *testing.T) {
+	setNoColor(t)
+	var buf bytes.Buffer
+	reporter := NewTextReporter(&buf)
+
+	data := DiscoveryData{
+		Tool: "s3spectre",
+		Summary: analyzer.DiscoverySummary{
+			TotalBuckets: 3,
+			TagRollup: map[string]*analyzer.TagGroupSummary{
+				"frontend": {BucketCount: 1, RiskScore: 20},
+				"backend":  {BucketCount: 2, RiskScore: 150, UnusedCount: 1, RiskyCount: 1},
+				"untagged": {BucketCount: 1, RiskScore: 60},
+			},
+		},
+	}
+
+	if err := reporter.GenerateDiscovery(data); err != nil {
+		t.Fatalf("GenerateDiscovery failed: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "Rollup by tag") {
+		t.Fatalf("expected a tag-rollup section, got: %s", out)
+	}
+	backendIdx := strings.Index(out, "backend:")
+	untaggedIdx := strings.Index(out, "untagged:")
+	frontendIdx := strings.Index(out, "frontend:")
+	if backendIdx == -1 || untaggedIdx == -1 || frontendIdx == -1 {
+		t.Fatalf("expected all three tag groups present, got: %s", out)
+	}
+	if !(backendIdx < untaggedIdx && untaggedIdx < frontendIdx) {
+		t.Fatalf("expected rollup sorted by descending risk score (backend > untagged > frontend), got order in: %s", out)
+	}
+}
+
+func TestTextReporter_TagRollup_OmittedWhenEmpty(t *testing.T) {
+	setNoColor(t)
+	var buf bytes.Buffer
+	reporter := NewTextReporter(&buf)
+
+	data := DiscoveryData{Tool: "s3spectre", Summary: analyzer.DiscoverySummary{TotalBuckets: 1}}
+
+	if err := reporter.GenerateDiscovery(data); err != nil {
+		t.Fatalf("GenerateDiscovery failed: %v", err)
+	}
+
+	if strings.Contains(buf.String(), "Rollup by tag") {
+		t.Fatalf("expected no rollup section when TagRollup is empty, got: %s", buf.String())
+	}
+}
+
+// TestTextReporter_TagRollup_TiedRiskScoreBreaksAlphabetically guards the
+// sort comparator's tiebreaker: when two tag groups have the exact same
+// risk score, order must fall back to alphabetical by tag value, not be
+// left to map iteration's nondeterministic order.
+func TestTextReporter_TagRollup_TiedRiskScoreBreaksAlphabetically(t *testing.T) {
+	setNoColor(t)
+	var buf bytes.Buffer
+	reporter := NewTextReporter(&buf)
+
+	data := DiscoveryData{
+		Tool: "s3spectre",
+		Summary: analyzer.DiscoverySummary{
+			TotalBuckets: 2,
+			TagRollup: map[string]*analyzer.TagGroupSummary{
+				"zeta":  {BucketCount: 1, RiskScore: 50},
+				"alpha": {BucketCount: 1, RiskScore: 50},
+			},
+		},
+	}
+
+	if err := reporter.GenerateDiscovery(data); err != nil {
+		t.Fatalf("GenerateDiscovery failed: %v", err)
+	}
+
+	out := buf.String()
+	alphaIdx := strings.Index(out, "alpha:")
+	zetaIdx := strings.Index(out, "zeta:")
+	if alphaIdx == -1 || zetaIdx == -1 {
+		t.Fatalf("expected both tag groups present, got: %s", out)
+	}
+	if alphaIdx > zetaIdx {
+		t.Fatalf("expected alphabetical tiebreak (alpha before zeta) for tied risk scores, got order in: %s", out)
+	}
+}

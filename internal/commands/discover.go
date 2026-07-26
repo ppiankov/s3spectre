@@ -28,6 +28,7 @@ var discoverFlags struct {
 	checkPublic      bool
 	estimateCost     bool
 	suggestLifecycle bool
+	groupByTag       string
 	maxConcurrency   int
 	outputFormat     string
 	outputFile       string
@@ -59,6 +60,7 @@ func init() {
 	discoverCmd.Flags().BoolVar(&discoverFlags.checkPublic, "check-public", false, "Check for public access")
 	discoverCmd.Flags().BoolVar(&discoverFlags.estimateCost, "estimate-cost", false, "Estimate monthly USD cost of version-sprawl storage overhead, and of inactive/unused bucket storage (approximate)")
 	discoverCmd.Flags().BoolVar(&discoverFlags.suggestLifecycle, "suggest-lifecycle-policy", false, "Suggest a deterministic lifecycle-rule snippet (JSON + Terraform) for version-sprawl findings; informational only, never applied")
+	discoverCmd.Flags().StringVar(&discoverFlags.groupByTag, "group-by-tag", "", "Roll up the discover summary by the given bucket tag key (e.g. Team); buckets missing the tag are grouped as 'untagged'")
 	discoverCmd.Flags().IntVar(&discoverFlags.maxConcurrency, "concurrency", 10, "Max concurrent S3 API calls")
 	discoverCmd.Flags().StringVarP(&discoverFlags.outputFormat, "format", "f", "text", "Output format: text, json, sarif, spectrehub, or markdown")
 	discoverCmd.Flags().StringVarP(&discoverFlags.outputFile, "output", "o", "", "Output file (default: stdout)")
@@ -233,6 +235,7 @@ func buildDiscoveryConfig() analyzer.DiscoveryConfig {
 		EstimateCost:                  discoverFlags.estimateCost,
 		PublicBucketAllowlistPatterns: cfg.PublicBucketAllowlistPatterns,
 		SuggestLifecyclePolicy:        discoverFlags.suggestLifecycle,
+		GroupByTag:                    discoverFlags.groupByTag,
 	}
 }
 

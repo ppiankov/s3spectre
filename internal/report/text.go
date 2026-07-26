@@ -334,6 +334,43 @@ func (r *TextReporter) printDiscoverySummary(summary analyzer.DiscoverySummary) 
 			len(summary.PublicBuckets))
 	}
 
+	if summary.TotalEstimatedCostUSD > 0 {
+		_, _ = fmt.Fprintf(r.writer, "%s: $%.2f/month\n",
+			color.CyanString("Total Estimated Cost (approximate)"),
+			summary.TotalEstimatedCostUSD)
+	}
+
+	_, _ = fmt.Fprintf(r.writer, "\n")
+
+	r.printTagRollup(summary.TagRollup)
+}
+
+// printTagRollup prints the --group-by-tag ownership rollup, sorted by
+// descending risk score (highest-risk group first) with tag value as a
+// stable tiebreaker.
+func (r *TextReporter) printTagRollup(rollup map[string]*analyzer.TagGroupSummary) {
+	if len(rollup) == 0 {
+		return
+	}
+	keys := make([]string, 0, len(rollup))
+	for k := range rollup {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		gi, gj := rollup[keys[i]], rollup[keys[j]]
+		if gi.RiskScore != gj.RiskScore {
+			return gi.RiskScore > gj.RiskScore
+		}
+		return keys[i] < keys[j]
+	})
+
+	_, _ = fmt.Fprintf(r.writer, "%s\n", color.CyanString("Rollup by tag"))
+	_, _ = fmt.Fprintf(r.writer, "%s\n", strings.Repeat("-", 70))
+	for _, k := range keys {
+		g := rollup[k]
+		_, _ = fmt.Fprintf(r.writer, "  %s: %d buckets, risk score %d (unused=%d risky=%d inactive=%d version_sprawl=%d)\n",
+			k, g.BucketCount, g.RiskScore, g.UnusedCount, g.RiskyCount, g.InactiveCount, g.VersionSprawlCount)
+	}
 	_, _ = fmt.Fprintf(r.writer, "\n")
 }
 

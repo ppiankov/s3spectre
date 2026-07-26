@@ -201,6 +201,64 @@ func TestSpectreHubReporter_GenerateDiscovery_LifecycleSuggestionAndStorageCost(
 	}
 }
 
+func TestSpectreHubReporter_GenerateDiscovery_TotalEstimatedCostUSD(t *testing.T) {
+	data := DiscoveryData{
+		Tool:    "s3spectre",
+		Version: "0.5.0",
+		Summary: analyzer.DiscoverySummary{TotalBuckets: 1, TotalEstimatedCostUSD: 11.99},
+		Buckets: map[string]*analyzer.BucketDiscovery{
+			"stale": {Name: "stale", Status: analyzer.StatusInactive, RiskScore: 100},
+		},
+	}
+
+	var buf bytes.Buffer
+	r := NewSpectreHubReporter(&buf)
+	if err := r.GenerateDiscovery(data); err != nil {
+		t.Fatalf("GenerateDiscovery: %v", err)
+	}
+
+	var envelope spectreEnvelope
+	if err := json.Unmarshal(buf.Bytes(), &envelope); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if envelope.Summary.TotalEstimatedCostUSD != 11.99 {
+		t.Errorf("summary.total_estimated_cost_usd = %v, want 11.99", envelope.Summary.TotalEstimatedCostUSD)
+	}
+}
+
+// TestSpectreHubReporter_GenerateDiscovery_TagRollup guards format parity:
+// --group-by-tag data must reach the spectrehub envelope the same way it
+// reaches text/markdown/plain-JSON output, not be silently dropped.
+func TestSpectreHubReporter_GenerateDiscovery_TagRollup(t *testing.T) {
+	data := DiscoveryData{
+		Tool:    "s3spectre",
+		Version: "0.5.0",
+		Summary: analyzer.DiscoverySummary{
+			TotalBuckets: 1,
+			TagRollup: map[string]*analyzer.TagGroupSummary{
+				"backend": {BucketCount: 1, RiskScore: 50},
+			},
+		},
+	}
+
+	var buf bytes.Buffer
+	r := NewSpectreHubReporter(&buf)
+	if err := r.GenerateDiscovery(data); err != nil {
+		t.Fatalf("GenerateDiscovery: %v", err)
+	}
+
+	var envelope spectreEnvelope
+	if err := json.Unmarshal(buf.Bytes(), &envelope); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	backend := envelope.Summary.TagRollup["backend"]
+	if backend == nil || backend.BucketCount != 1 || backend.RiskScore != 50 {
+		t.Errorf("expected tag_rollup.backend in spectrehub envelope, got %+v", envelope.Summary.TagRollup)
+	}
+}
+
 func TestSpectreHubReporter_EmptyFindings(t *testing.T) {
 	data := Data{
 		Tool:      "s3spectre",
