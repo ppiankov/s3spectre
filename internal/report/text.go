@@ -368,8 +368,8 @@ func (r *TextReporter) printTagRollup(rollup map[string]*analyzer.TagGroupSummar
 	_, _ = fmt.Fprintf(r.writer, "%s\n", strings.Repeat("-", 70))
 	for _, k := range keys {
 		g := rollup[k]
-		_, _ = fmt.Fprintf(r.writer, "  %s: %d buckets, risk score %d (unused=%d risky=%d inactive=%d version_sprawl=%d)\n",
-			k, g.BucketCount, g.RiskScore, g.UnusedCount, g.RiskyCount, g.InactiveCount, g.VersionSprawlCount)
+		_, _ = fmt.Fprintf(r.writer, "  %s: %d buckets, risk score %d (avg %.1f/bucket) (unused=%d risky=%d inactive=%d version_sprawl=%d)\n",
+			k, g.BucketCount, g.RiskScore, g.AverageRiskScore, g.UnusedCount, g.RiskyCount, g.InactiveCount, g.VersionSprawlCount)
 	}
 	_, _ = fmt.Fprintf(r.writer, "\n")
 }

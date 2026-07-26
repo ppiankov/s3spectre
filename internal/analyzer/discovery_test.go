@@ -1,6 +1,7 @@
 package analyzer
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/ppiankov/s3spectre/internal/s3"
@@ -987,5 +988,117 @@ func TestAnalyzeDiscovery_GroupByTag_LiteralUntaggedValueCollidesWithFallback(t 
 	}
 	if g := result.Summary.TagRollup["untagged"]; g == nil || g.BucketCount != 2 {
 		t.Fatalf("expected both buckets merged under 'untagged', got %+v", result.Summary.TagRollup["untagged"])
+	}
+}
+
+// TestAnalyzeDiscovery_GroupByTag_AverageRiskScore_SurfacesSmallHighSeverityGroup
+// is the core WO-48 scenario, taken directly from the real-account dogfood
+// finding: a large tag group with mostly-low-severity buckets must not
+// outrank, by average, a small tag group whose few buckets are all severe --
+// even though the large group's summed RiskScore is bigger.
+func TestAnalyzeDiscovery_GroupByTag_AverageRiskScore_SurfacesSmallHighSeverityGroup(t *testing.T) {
+	buckets := map[string]*s3.BucketInfo{}
+	// Large group: 15 buckets, each barely crossing the threshold (age-only,
+	// 20 pts) -- summed total 300, average 20/bucket.
+	for i := 0; i < 15; i++ {
+		name := fmt.Sprintf("large-group-bucket-%d", i)
+		buckets[name] = &s3.BucketInfo{
+			Name:      name,
+			Tags:      map[string]string{"Team": "large-group"},
+			AgeInDays: 500,
+		}
+	}
+	// Small group: 2 buckets, each severely inactive (100 pts, the >5x
+	// threshold tier) -- summed total 200 (less than the large group's 300),
+	// but average 100/bucket (far more than the large group's 20).
+	for i := 0; i < 2; i++ {
+		name := fmt.Sprintf("small-group-bucket-%d", i)
+		buckets[name] = &s3.BucketInfo{
+			Name:              name,
+			Tags:              map[string]string{"Team": "small-group"},
+			DaysSinceActivity: 1000,
+		}
+	}
+	config := DiscoveryConfig{
+		AgeThresholdDays:        365,
+		InactivityThresholdDays: 180,
+		RiskScoreThreshold:      20,
+		GroupByTag:              "Team",
+	}
+
+	result := AnalyzeDiscovery(buckets, config)
+
+	large := result.Summary.TagRollup["large-group"]
+	small := result.Summary.TagRollup["small-group"]
+	if large == nil || small == nil {
+		t.Fatalf("expected both groups present, got large=%+v small=%+v", large, small)
+	}
+
+	if large.RiskScore <= small.RiskScore {
+		t.Fatalf("expected the large group's summed risk score (%d) to exceed the small group's (%d) -- this test's premise requires it", large.RiskScore, small.RiskScore)
+	}
+	if small.AverageRiskScore <= large.AverageRiskScore {
+		t.Fatalf("expected the small, severely-risky group's average (%v) to exceed the large, mildly-risky group's average (%v) despite its lower summed score", small.AverageRiskScore, large.AverageRiskScore)
+	}
+}
+
+// TestAnalyzeDiscovery_GroupByTag_AverageRiskScore_ComputedCorrectly asserts
+// a hardcoded expected value derived independently from the scoring rules
+// (Factor 1 age=20pts, Factor 2 base-tier inactivity=50pts + Factor 3
+// empty=30pts), rather than recomputing RiskScore/BucketCount from the
+// result itself -- the latter would pass even if AnalyzeDiscovery's
+// aggregation or division were both subtly wrong in a compensating way.
+func TestAnalyzeDiscovery_GroupByTag_AverageRiskScore_ComputedCorrectly(t *testing.T) {
+	buckets := map[string]*s3.BucketInfo{
+		"a": {Name: "a", Tags: map[string]string{"Team": "backend"}, AgeInDays: 500},
+		"b": {Name: "b", Tags: map[string]string{"Team": "backend"}, IsEmpty: true, DaysSinceActivity: 200},
+	}
+	config := DiscoveryConfig{
+		AgeThresholdDays:        365,
+		InactivityThresholdDays: 180,
+		RiskScoreThreshold:      20,
+		GroupByTag:              "Team",
+	}
+
+	result := AnalyzeDiscovery(buckets, config)
+
+	backend := result.Summary.TagRollup["backend"]
+	if backend == nil {
+		t.Fatal("expected a 'backend' rollup entry")
+	}
+	// bucket "a": age factor only = 20. bucket "b": empty (30) + base-tier
+	// inactivity (50, since 200 days is under both the 2x and 5x multiplier
+	// of the 180-day threshold) = 80. Sum = 100, over 2 buckets = 50.0.
+	if backend.RiskScore != 100 {
+		t.Fatalf("expected summed RiskScore=100 (20+80), got %d -- test's hardcoded premise no longer holds, update both the fixture and this comment together", backend.RiskScore)
+	}
+	if backend.BucketCount != 2 {
+		t.Fatalf("expected BucketCount=2, got %d", backend.BucketCount)
+	}
+	if backend.AverageRiskScore != 50.0 {
+		t.Fatalf("expected AverageRiskScore=50.0 (hardcoded, independent of the production division expression), got %v", backend.AverageRiskScore)
+	}
+}
+
+// TestAnalyzeDiscovery_GroupByTag_AverageRiskScore_NoDivideByZero guards the
+// structural invariant: every TagRollup entry has BucketCount >= 1, since an
+// entry is only ever created when adding a bucket to it.
+func TestAnalyzeDiscovery_GroupByTag_AverageRiskScore_NoDivideByZero(t *testing.T) {
+	buckets := map[string]*s3.BucketInfo{
+		"healthy": {Name: "healthy", Tags: map[string]string{"Team": "backend"}},
+	}
+	config := DiscoveryConfig{RiskScoreThreshold: 100, GroupByTag: "Team"}
+
+	result := AnalyzeDiscovery(buckets, config)
+
+	backend := result.Summary.TagRollup["backend"]
+	if backend == nil {
+		t.Fatal("expected a 'backend' rollup entry")
+	}
+	if backend.BucketCount == 0 {
+		t.Fatal("expected BucketCount >= 1 for any populated rollup entry")
+	}
+	if backend.AverageRiskScore != 0 {
+		t.Fatalf("expected AverageRiskScore=0 for a healthy bucket (risk score 0), got %v", backend.AverageRiskScore)
 	}
 }
