@@ -58,6 +58,22 @@ func xmlErrorResponse(code, message string) *http.Response {
 	}
 }
 
+func xmlAccessDeniedResponse() *http.Response {
+	body := `<?xml version="1.0" encoding="UTF-8"?>
+<Error>
+  <Code>AccessDenied</Code>
+  <Message>Access Denied</Message>
+  <BucketName>test-bucket</BucketName>
+  <RequestId>req-1</RequestId>
+  <HostId>host-1</HostId>
+</Error>`
+	return &http.Response{
+		StatusCode: http.StatusForbidden,
+		Header:     http.Header{"Content-Type": []string{"application/xml"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+}
+
 func TestInspector_InspectPrefixWithClient(t *testing.T) {
 	listObjectsXML := `<?xml version="1.0" encoding="UTF-8"?>
 <ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
@@ -248,6 +264,23 @@ func TestInspector_FetchEncryption_NotConfigured(t *testing.T) {
 	}
 }
 
+// TestInspector_FetchEncryption_GenuineErrorReturnsNil guards against a real
+// API error (e.g. AccessDenied) being silently defaulted to Enabled=false --
+// that would misreport "no encryption" for a bucket whose actual state is
+// simply unknown because the caller lacks permission to check it.
+func TestInspector_FetchEncryption_GenuineErrorReturnsNil(t *testing.T) {
+	rt := roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		return xmlAccessDeniedResponse(), nil
+	})
+	client := newTestClient(t, rt)
+	inspector := NewInspector(client, 1)
+
+	enc := inspector.fetchEncryption(context.Background(), client, "test-bucket")
+	if enc != nil {
+		t.Fatalf("expected nil EncryptionInfo on a genuine API error, got %+v", enc)
+	}
+}
+
 func TestInspector_FetchPublicAccessBlock_FullyBlocked(t *testing.T) {
 	pabXML := `<?xml version="1.0" encoding="UTF-8"?>
 <PublicAccessBlockConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
@@ -303,6 +336,25 @@ func TestInspector_FetchPublicAccessBlock_NotConfigured(t *testing.T) {
 	}
 	if pa.BlockPublicAcls || pa.IgnorePublicAcls || pa.BlockPublicPolicy || pa.RestrictPublicBuckets {
 		t.Fatalf("expected all four protection flags false when not configured, got %+v", pa)
+	}
+}
+
+// TestInspector_FetchPublicAccessBlock_GenuineErrorReturnsNil guards against
+// the more serious version of the same bug: a real API error (e.g.
+// AccessDenied) being silently defaulted to IsPublic=true, which would report
+// a false-positive "public access enabled" finding for every bucket the
+// caller merely lacks permission to check, rather than surfacing that the
+// state is unknown.
+func TestInspector_FetchPublicAccessBlock_GenuineErrorReturnsNil(t *testing.T) {
+	rt := roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		return xmlAccessDeniedResponse(), nil
+	})
+	client := newTestClient(t, rt)
+	inspector := NewInspector(client, 1)
+
+	pa := inspector.fetchPublicAccessBlock(context.Background(), client, "test-bucket")
+	if pa != nil {
+		t.Fatalf("expected nil PublicAccessInfo on a genuine API error, got %+v", pa)
 	}
 }
 

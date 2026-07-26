@@ -633,10 +633,12 @@ func (i *Inspector) inspectBucketFull(ctx context.Context, bucket, region string
 
 // fetchEncryption retrieves a bucket's default encryption configuration.
 // A "not configured" response is a normal state, not an error: it means
-// Enabled: false.
+// Enabled: false. A genuine API error (permissions, throttling, network)
+// returns nil rather than a false "disabled" default -- the tool presents
+// evidence and does not guess when it doesn't actually know the state.
 func (i *Inspector) fetchEncryption(ctx context.Context, client *Client, bucket string) *EncryptionInfo {
 	enc := &EncryptionInfo{}
-	_ = client.WithRetry(ctx, func() error {
+	err := client.WithRetry(ctx, func() error {
 		encResult, err := client.s3Client.GetBucketEncryption(ctx, &s3.GetBucketEncryptionInput{
 			Bucket: aws.String(bucket),
 		})
@@ -655,6 +657,9 @@ func (i *Inspector) fetchEncryption(ctx context.Context, client *Client, bucket 
 		}
 		return nil
 	})
+	if err != nil {
+		return nil
+	}
 	return enc
 }
 
@@ -663,10 +668,13 @@ func (i *Inspector) fetchEncryption(ctx context.Context, client *Client, bucket 
 // of the four protections are in place, which is itself a real exposure risk --
 // IsPublic is true whenever the block configuration is not fully locked down,
 // matching the common CSPM heuristic (flagging incomplete protection coverage
-// rather than requiring proof of an actual public policy/ACL).
+// rather than requiring proof of an actual public policy/ACL). A genuine API
+// error returns nil rather than defaulting to IsPublic=true: an access-denied
+// or throttled call must not be reported as a false-positive public-access
+// finding.
 func (i *Inspector) fetchPublicAccessBlock(ctx context.Context, client *Client, bucket string) *PublicAccessInfo {
 	pa := &PublicAccessInfo{}
-	_ = client.WithRetry(ctx, func() error {
+	err := client.WithRetry(ctx, func() error {
 		pabResult, err := client.s3Client.GetPublicAccessBlock(ctx, &s3.GetPublicAccessBlockInput{
 			Bucket: aws.String(bucket),
 		})
@@ -682,6 +690,9 @@ func (i *Inspector) fetchPublicAccessBlock(ctx context.Context, client *Client, 
 		}
 		return nil
 	})
+	if err != nil {
+		return nil
+	}
 	pa.IsPublic = !(pa.BlockPublicAcls && pa.IgnorePublicAcls && pa.BlockPublicPolicy && pa.RestrictPublicBuckets)
 	return pa
 }
