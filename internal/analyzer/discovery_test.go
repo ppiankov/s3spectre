@@ -402,3 +402,48 @@ func TestAnalyzeDiscovery_SummaryCategories(t *testing.T) {
 		t.Errorf("expected 2 regions, got %d", result.Summary.TotalRegions)
 	}
 }
+
+// TestAnalyzeDiscovery_VersionedBucketInventory_WithLifecycle mirrors the
+// scan-path guard for the discover path: a versioned bucket with lifecycle
+// rules configured was previously invisible in discover output too.
+func TestAnalyzeDiscovery_VersionedBucketInventory_WithLifecycle(t *testing.T) {
+	buckets := map[string]*s3.BucketInfo{
+		"well-managed": {Name: "well-managed", VersioningEnabled: true, LifecycleRules: 1},
+	}
+
+	result := AnalyzeDiscovery(buckets, DiscoveryConfig{RiskScoreThreshold: 100})
+
+	if len(result.Summary.VersionedBuckets) != 1 || result.Summary.VersionedBuckets[0] != "well-managed" {
+		t.Errorf("expected well-managed bucket in VersionedBuckets inventory, got %v", result.Summary.VersionedBuckets)
+	}
+	if len(result.Summary.VersionSprawl) != 0 {
+		t.Errorf("expected no VersionSprawl finding for a bucket with lifecycle rules, got %v", result.Summary.VersionSprawl)
+	}
+}
+
+func TestAnalyzeDiscovery_VersionedBucketInventory_WithoutLifecycle(t *testing.T) {
+	buckets := map[string]*s3.BucketInfo{
+		"sprawling": {Name: "sprawling", VersioningEnabled: true, LifecycleRules: 0},
+	}
+
+	result := AnalyzeDiscovery(buckets, DiscoveryConfig{RiskScoreThreshold: 30})
+
+	if len(result.Summary.VersionedBuckets) != 1 || result.Summary.VersionedBuckets[0] != "sprawling" {
+		t.Errorf("expected sprawling bucket in VersionedBuckets inventory, got %v", result.Summary.VersionedBuckets)
+	}
+	if len(result.Summary.VersionSprawl) != 1 || result.Summary.VersionSprawl[0] != "sprawling" {
+		t.Errorf("expected sprawling bucket still in VersionSprawl, got %v", result.Summary.VersionSprawl)
+	}
+}
+
+func TestAnalyzeDiscovery_VersionedBucketInventory_NoVersioning(t *testing.T) {
+	buckets := map[string]*s3.BucketInfo{
+		"plain": {Name: "plain", VersioningEnabled: false},
+	}
+
+	result := AnalyzeDiscovery(buckets, DiscoveryConfig{RiskScoreThreshold: 100})
+
+	if len(result.Summary.VersionedBuckets) != 0 {
+		t.Errorf("expected no versioned-bucket entry for a non-versioned bucket, got %v", result.Summary.VersionedBuckets)
+	}
+}

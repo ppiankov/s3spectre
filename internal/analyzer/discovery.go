@@ -40,7 +40,11 @@ type DiscoverySummary struct {
 	RiskyBuckets    []string `json:"risky_buckets,omitempty"`
 	InactiveBuckets []string `json:"inactive_buckets,omitempty"`
 	VersionSprawl   []string `json:"version_sprawl,omitempty"`
-	TotalRegions    int      `json:"total_regions"`
+	// VersionedBuckets lists every bucket with versioning enabled, regardless
+	// of lifecycle-rule configuration -- an informational inventory, distinct
+	// from VersionSprawl (which only lists the misconfigured subset).
+	VersionedBuckets []string `json:"versioned_buckets,omitempty"`
+	TotalRegions     int      `json:"total_regions"`
 }
 
 // AnalyzeDiscovery analyzes buckets discovered from AWS
@@ -63,6 +67,10 @@ func AnalyzeDiscovery(buckets map[string]*s3.BucketInfo, config DiscoveryConfig)
 
 		// Update summary
 		result.Summary.TotalBuckets++
+
+		if info.VersioningEnabled {
+			result.Summary.VersionedBuckets = append(result.Summary.VersionedBuckets, name)
+		}
 
 		switch discovery.Status {
 		case StatusOK:

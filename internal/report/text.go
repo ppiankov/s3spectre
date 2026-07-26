@@ -117,6 +117,12 @@ func (r *TextReporter) printSummary(summary analyzer.Summary) {
 			len(summary.LifecycleMisconfig))
 	}
 
+	if len(summary.VersionedBuckets) > 0 {
+		_, _ = fmt.Fprintf(r.writer, "%s: %d\n",
+			color.CyanString("Versioned Buckets"),
+			len(summary.VersionedBuckets))
+	}
+
 	_, _ = fmt.Fprintf(r.writer, "\n")
 }
 
@@ -242,6 +248,18 @@ func (r *TextReporter) printFindings(buckets map[string]*analyzer.BucketAnalysis
 		}
 		_, _ = fmt.Fprintf(r.writer, "\n")
 	}
+
+	// Print versioned buckets inventory (informational, not a severity finding --
+	// lists every versioned bucket regardless of lifecycle-rule configuration).
+	if len(summary.VersionedBuckets) > 0 {
+		_, _ = fmt.Fprintf(r.writer, "%s\n", color.CyanString("Versioned Buckets: %d", len(summary.VersionedBuckets)))
+		_, _ = fmt.Fprintf(r.writer, "%s\n", strings.Repeat("-", 50))
+		sort.Strings(summary.VersionedBuckets)
+		for _, bucket := range summary.VersionedBuckets {
+			_, _ = fmt.Fprintf(r.writer, "  %s: %s\n", color.CyanString("[VERSIONED]"), bucket)
+		}
+		_, _ = fmt.Fprintf(r.writer, "\n")
+	}
 }
 
 // GenerateDiscovery generates a text discovery report
@@ -302,6 +320,12 @@ func (r *TextReporter) printDiscoverySummary(summary analyzer.DiscoverySummary) 
 		_, _ = fmt.Fprintf(r.writer, "%s: %d\n",
 			color.MagentaString("Version Sprawl"),
 			len(summary.VersionSprawl))
+	}
+
+	if len(summary.VersionedBuckets) > 0 {
+		_, _ = fmt.Fprintf(r.writer, "%s: %d\n",
+			color.CyanString("Versioned Buckets"),
+			len(summary.VersionedBuckets))
 	}
 
 	_, _ = fmt.Fprintf(r.writer, "\n")
@@ -456,6 +480,23 @@ func (r *TextReporter) printDiscoveryFindings(buckets map[string]*analyzer.Bucke
 			_, _ = fmt.Fprintf(r.writer, "  ... and %d more\n", len(healthyBuckets)-10)
 		}
 
+		_, _ = fmt.Fprintf(r.writer, "\n")
+	}
+
+	// Print versioned buckets inventory (informational, not a severity finding --
+	// lists every versioned bucket regardless of lifecycle-rule configuration).
+	if len(summary.VersionedBuckets) > 0 {
+		_, _ = fmt.Fprintf(r.writer, "%s\n", color.CyanString("Versioned Buckets: %d", len(summary.VersionedBuckets)))
+		_, _ = fmt.Fprintf(r.writer, "%s\n", strings.Repeat("-", 70))
+		sort.Strings(summary.VersionedBuckets)
+		for _, bucket := range summary.VersionedBuckets {
+			discovery := buckets[bucket]
+			region := ""
+			if discovery != nil {
+				region = discovery.Region
+			}
+			_, _ = fmt.Fprintf(r.writer, "  %s: %s (%s)\n", color.CyanString("[VERSIONED]"), bucket, region)
+		}
 		_, _ = fmt.Fprintf(r.writer, "\n")
 	}
 }

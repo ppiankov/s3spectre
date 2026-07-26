@@ -341,3 +341,52 @@ func TestFilterRefsByBucket_NoMatch(t *testing.T) {
 		t.Fatalf("expected 0 refs, got %d", len(filtered))
 	}
 }
+
+// TestAnalyze_VersionedBucketInventory_WithLifecycle guards against a bucket
+// with versioning enabled AND proper lifecycle rules being completely invisible
+// in the report -- it should surface in the new informational inventory even
+// though it is not a VersionSprawl misconfig.
+func TestAnalyze_VersionedBucketInventory_WithLifecycle(t *testing.T) {
+	bucketInfo := map[string]*s3.BucketInfo{
+		"well-managed": {Name: "well-managed", Exists: true, VersioningEnabled: true, LifecycleRules: 1},
+	}
+
+	result := Analyze(nil, bucketInfo, Config{})
+
+	if len(result.Summary.VersionedBuckets) != 1 || result.Summary.VersionedBuckets[0] != "well-managed" {
+		t.Errorf("expected well-managed bucket in VersionedBuckets inventory, got %v", result.Summary.VersionedBuckets)
+	}
+	if len(result.Summary.VersionSprawl) != 0 {
+		t.Errorf("expected no VersionSprawl finding for a bucket with lifecycle rules, got %v", result.Summary.VersionSprawl)
+	}
+}
+
+// TestAnalyze_VersionedBucketInventory_WithoutLifecycle confirms a bucket that
+// IS a VersionSprawl misconfig also appears in the new inventory -- additive,
+// not a replacement.
+func TestAnalyze_VersionedBucketInventory_WithoutLifecycle(t *testing.T) {
+	bucketInfo := map[string]*s3.BucketInfo{
+		"sprawling": {Name: "sprawling", Exists: true, VersioningEnabled: true, LifecycleRules: 0},
+	}
+
+	result := Analyze(nil, bucketInfo, Config{})
+
+	if len(result.Summary.VersionedBuckets) != 1 || result.Summary.VersionedBuckets[0] != "sprawling" {
+		t.Errorf("expected sprawling bucket in VersionedBuckets inventory, got %v", result.Summary.VersionedBuckets)
+	}
+	if len(result.Summary.VersionSprawl) != 1 || result.Summary.VersionSprawl[0] != "sprawling" {
+		t.Errorf("expected sprawling bucket still in VersionSprawl, got %v", result.Summary.VersionSprawl)
+	}
+}
+
+func TestAnalyze_VersionedBucketInventory_NoVersioning(t *testing.T) {
+	bucketInfo := map[string]*s3.BucketInfo{
+		"plain": {Name: "plain", Exists: true, VersioningEnabled: false},
+	}
+
+	result := Analyze(nil, bucketInfo, Config{})
+
+	if len(result.Summary.VersionedBuckets) != 0 {
+		t.Errorf("expected no versioned-bucket entry for a non-versioned bucket, got %v", result.Summary.VersionedBuckets)
+	}
+}
