@@ -28,6 +28,10 @@ func Analyze(refs []scanner.Reference, bucketInfo map[string]*s3.BucketInfo, con
 		// Update summary
 		result.Summary.TotalBuckets++
 
+		if info.VersioningEnabled {
+			result.Summary.VersionedBuckets = append(result.Summary.VersionedBuckets, bucket)
+		}
+
 		switch analysis.Status {
 		case StatusOK:
 			result.Summary.OKBuckets++

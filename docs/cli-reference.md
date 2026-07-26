@@ -20,7 +20,9 @@ docker pull ghcr.io/ppiankov/s3spectre:latest
 git clone https://github.com/ppiankov/s3spectre.git
 cd s3spectre && make build
 
-# Windows
+# Windows: download s3spectre_<version>_windows_amd64.zip (or _arm64) from
+# https://github.com/ppiankov/s3spectre/releases, extract, add to PATH.
+# Alternatively, with Go installed:
 go install github.com/ppiankov/s3spectre/cmd/s3spectre@latest
 ```
 
@@ -50,6 +52,7 @@ timeout: 5m
 | `stale_days` | scan | Default for `--stale-days` |
 | `format` | scan, discover | Default for `--format` |
 | `timeout` | scan, discover | Default for `--timeout` |
+| `risk_threshold` | discover | Default for `--risk-threshold` |
 
 
 ## Usage
@@ -91,7 +94,7 @@ s3spectre scan --repo . --include-references --format json
 | `--check-unused` | `false` | Enable unused bucket scoring |
 | `--unused-threshold-days` | `180` | Unused bucket threshold |
 | `--concurrency` | `10` | Max concurrent S3 API calls |
-| `--format, -f` | `text` | Output format: `text` or `json` |
+| `--format, -f` | `text` | Output format: `text`, `json`, `sarif`, `spectrehub`, or `markdown` |
 | `--output, -o` | stdout | Output file |
 | `--fail-on-missing` | `false` | Exit non-zero on missing buckets |
 | `--fail-on-stale` | `false` | Exit non-zero on stale prefixes |
@@ -127,10 +130,12 @@ s3spectre discover --fail-on-unused --fail-on-risky --format json
 | `--regions` | | Specific regions (comma-separated) |
 | `--age-threshold-days` | `365` | Flag buckets older than N days |
 | `--inactive-days` | `180` | Flag buckets inactive for N days |
+| `--risk-threshold` | `100` | Risk score at which a bucket is flagged unused/risky/inactive |
 | `--check-encryption` | `false` | Flag missing encryption |
 | `--check-public` | `false` | Flag public access |
+| `--estimate-cost` | `false` | Approximate monthly USD cost of version-sprawl overhead |
 | `--concurrency` | `10` | Max concurrent S3 API calls |
-| `--format, -f` | `text` | Output format: `text` or `json` |
+| `--format, -f` | `text` | Output format: `text`, `json`, `sarif`, `spectrehub`, or `markdown` |
 | `--output, -o` | stdout | Output file |
 | `--fail-on-unused` | `false` | Exit non-zero on unused buckets |
 | `--fail-on-risky` | `false` | Exit non-zero on risky configs |
@@ -202,8 +207,8 @@ Key design decisions:
 
 - **No object-level scanning.** S3Spectre inspects bucket and prefix metadata. It does not list or read individual objects beyond what is needed for prefix existence and staleness checks.
 - **Regex-based code scanning.** The scanner uses pattern matching, not AST parsing. It will miss dynamically constructed bucket names and may produce false positives on commented-out code.
-- **No cost estimation.** The tool identifies unused resources but does not calculate storage costs.
-- **IAM permissions required.** Needs `s3:ListBucket`, `s3:ListAllMyBuckets`, `s3:GetBucketLocation`, `s3:GetBucketVersioning`, `s3:GetLifecycleConfiguration`, and `s3:GetBucketTagging`. Missing permissions produce access-denied errors, not silent failures.
+- **No cost estimation by default.** `discover --estimate-cost` gives an approximate monthly USD figure for version-sprawl storage overhead, using an embedded on-demand pricing table (S3 Standard only, no request/data-transfer charges). Everything else -- unused/inactive bucket findings, scan mode -- remains unpriced.
+- **IAM permissions required.** Needs `s3:ListBucket`, `s3:ListAllMyBuckets`, `s3:GetBucketLocation`, `s3:GetBucketVersioning`, `s3:GetLifecycleConfiguration`, `s3:GetBucketTagging`, `s3:GetEncryptionConfiguration`, and `s3:GetBucketPublicAccessBlock`. `discover` always calls the encryption and public-access-block APIs (not just when `--check-encryption`/`--check-public` are passed -- those flags only gate whether the analyzer scores the result), so missing either permission is not purely cosmetic. Missing permissions for the core listing/inspection calls produce access-denied errors; missing permissions specifically for `GetEncryptionConfiguration`/`GetBucketPublicAccessBlock` instead silently omit those two fields for the affected bucket (`--check-encryption`/`--check-public` findings for it), rather than failing the whole scan.
 - **No real-time monitoring.** S3Spectre is a point-in-time scanner, not a daemon. Run it in CI or on a schedule.
 - **Single AWS account.** Cross-account scanning is not supported.
 - **Progress line artifacts.** The TTY progress indicator uses carriage return without clearing the full line, so shorter bucket names leave trailing characters from the previous name. Cosmetic only.

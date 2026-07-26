@@ -95,7 +95,49 @@ func TestAnalyzeBucketDiscovery_InactivityFactor(t *testing.T) {
 	d := analyzeBucketDiscovery(info, config)
 
 	if d.RiskScore != 50 {
-		t.Errorf("expected risk score 50 for inactivity, got %d", d.RiskScore)
+		t.Errorf("expected risk score 50 for inactivity just past threshold, got %d", d.RiskScore)
+	}
+}
+
+func TestAnalyzeBucketDiscovery_InactivityFactor_ScalesForModerateStaleness(t *testing.T) {
+	// Between 2x and 5x the threshold: 75 points, still below the default
+	// 100-point threshold on this factor alone.
+	info := &s3.BucketInfo{Name: "stale", DaysSinceActivity: 400}
+	config := DiscoveryConfig{InactivityThresholdDays: 180, RiskScoreThreshold: 100}
+
+	d := analyzeBucketDiscovery(info, config)
+
+	if d.RiskScore != 75 {
+		t.Errorf("expected risk score 75 for moderate staleness (>2x threshold), got %d", d.RiskScore)
+	}
+}
+
+// TestAnalyzeBucketDiscovery_InactivityFactor_SurfacesSevereStaleness guards
+// against multi-year-inactive buckets (real accounts have shown 1000+ days)
+// being silently classified OK because the flat 50-point inactivity signal
+// never alone crosses the default 100-point threshold.
+func TestAnalyzeBucketDiscovery_InactivityFactor_SurfacesSevereStaleness(t *testing.T) {
+	info := &s3.BucketInfo{Name: "ancient", DaysSinceActivity: 1171}
+	config := DiscoveryConfig{InactivityThresholdDays: 180, RiskScoreThreshold: 100}
+
+	d := analyzeBucketDiscovery(info, config)
+
+	if d.RiskScore != 100 {
+		t.Errorf("expected risk score 100 for severe staleness (>5x threshold), got %d", d.RiskScore)
+	}
+	if d.Status == StatusOK {
+		t.Errorf("expected a bucket inactive for 1171 days to not be classified OK at the default threshold")
+	}
+}
+
+func TestAnalyzeBucketDiscovery_RiskThresholdConfigurable(t *testing.T) {
+	info := &s3.BucketInfo{Name: "stale", DaysSinceActivity: 200}
+	config := DiscoveryConfig{InactivityThresholdDays: 180, RiskScoreThreshold: 40}
+
+	d := analyzeBucketDiscovery(info, config)
+
+	if d.Status == StatusOK {
+		t.Errorf("expected risk score 50 to cross a lowered threshold of 40, got status %s", d.Status)
 	}
 }
 
@@ -358,5 +400,88 @@ func TestAnalyzeDiscovery_SummaryCategories(t *testing.T) {
 	}
 	if result.Summary.TotalRegions != 2 {
 		t.Errorf("expected 2 regions, got %d", result.Summary.TotalRegions)
+	}
+}
+
+// TestAnalyzeDiscovery_VersionedBucketInventory_WithLifecycle mirrors the
+// scan-path guard for the discover path: a versioned bucket with lifecycle
+// rules configured was previously invisible in discover output too.
+func TestAnalyzeDiscovery_VersionedBucketInventory_WithLifecycle(t *testing.T) {
+	buckets := map[string]*s3.BucketInfo{
+		"well-managed": {Name: "well-managed", VersioningEnabled: true, LifecycleRules: 1},
+	}
+
+	result := AnalyzeDiscovery(buckets, DiscoveryConfig{RiskScoreThreshold: 100})
+
+	if len(result.Summary.VersionedBuckets) != 1 || result.Summary.VersionedBuckets[0] != "well-managed" {
+		t.Errorf("expected well-managed bucket in VersionedBuckets inventory, got %v", result.Summary.VersionedBuckets)
+	}
+	if len(result.Summary.VersionSprawl) != 0 {
+		t.Errorf("expected no VersionSprawl finding for a bucket with lifecycle rules, got %v", result.Summary.VersionSprawl)
+	}
+}
+
+func TestAnalyzeDiscovery_VersionedBucketInventory_WithoutLifecycle(t *testing.T) {
+	buckets := map[string]*s3.BucketInfo{
+		"sprawling": {Name: "sprawling", VersioningEnabled: true, LifecycleRules: 0},
+	}
+
+	result := AnalyzeDiscovery(buckets, DiscoveryConfig{RiskScoreThreshold: 30})
+
+	if len(result.Summary.VersionedBuckets) != 1 || result.Summary.VersionedBuckets[0] != "sprawling" {
+		t.Errorf("expected sprawling bucket in VersionedBuckets inventory, got %v", result.Summary.VersionedBuckets)
+	}
+	if len(result.Summary.VersionSprawl) != 1 || result.Summary.VersionSprawl[0] != "sprawling" {
+		t.Errorf("expected sprawling bucket still in VersionSprawl, got %v", result.Summary.VersionSprawl)
+	}
+}
+
+func TestAnalyzeDiscovery_VersionedBucketInventory_NoVersioning(t *testing.T) {
+	buckets := map[string]*s3.BucketInfo{
+		"plain": {Name: "plain", VersioningEnabled: false},
+	}
+
+	result := AnalyzeDiscovery(buckets, DiscoveryConfig{RiskScoreThreshold: 100})
+
+	if len(result.Summary.VersionedBuckets) != 0 {
+		t.Errorf("expected no versioned-bucket entry for a non-versioned bucket, got %v", result.Summary.VersionedBuckets)
+	}
+}
+
+func TestAnalyzeBucketDiscovery_EstimateCost_ComputesOverheadWhenEnabled(t *testing.T) {
+	info := &s3.BucketInfo{
+		Name:              "sprawling",
+		Region:            "us-east-1",
+		VersioningEnabled: true,
+		LifecycleRules:    0,
+		TotalSize:         1 * 1024 * 1024 * 1024,  // 1 GiB current
+		TotalVersionSize:  11 * 1024 * 1024 * 1024, // 11 GiB across all versions
+	}
+	config := DiscoveryConfig{EstimateCost: true, RiskScoreThreshold: 100}
+
+	d := analyzeBucketDiscovery(info, config)
+
+	if d.EstimatedMonthlyCostUSD <= 0 {
+		t.Fatalf("expected a positive cost estimate for 10 GiB of overhead, got %v", d.EstimatedMonthlyCostUSD)
+	}
+}
+
+// TestAnalyzeBucketDiscovery_EstimateCost_OffByDefault guards against the
+// opt-in flag changing behavior when not explicitly enabled.
+func TestAnalyzeBucketDiscovery_EstimateCost_OffByDefault(t *testing.T) {
+	info := &s3.BucketInfo{
+		Name:              "sprawling",
+		Region:            "us-east-1",
+		VersioningEnabled: true,
+		LifecycleRules:    0,
+		TotalSize:         1 * 1024 * 1024 * 1024,
+		TotalVersionSize:  11 * 1024 * 1024 * 1024,
+	}
+	config := DiscoveryConfig{RiskScoreThreshold: 100} // EstimateCost left false
+
+	d := analyzeBucketDiscovery(info, config)
+
+	if d.EstimatedMonthlyCostUSD != 0 {
+		t.Fatalf("expected no cost estimate when EstimateCost is off, got %v", d.EstimatedMonthlyCostUSD)
 	}
 }

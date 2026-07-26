@@ -24,8 +24,36 @@ func TestDiscoverFlagDefaults(t *testing.T) {
 	if discoverFlags.inactiveDays != 180 {
 		t.Fatalf("expected default inactive-days 180, got %d", discoverFlags.inactiveDays)
 	}
+	if discoverFlags.riskThreshold != 100 {
+		t.Fatalf("expected default risk-threshold 100, got %d", discoverFlags.riskThreshold)
+	}
 	if discoverCmd.Flags().Lookup("format").DefValue != "text" {
 		t.Fatalf("expected flag default format text, got %q", discoverCmd.Flags().Lookup("format").DefValue)
+	}
+}
+
+func TestApplyConfigToDiscoverFlags_RiskThreshold(t *testing.T) {
+	origThreshold := discoverFlags.riskThreshold
+	origCfg := cfg
+	t.Cleanup(func() {
+		discoverFlags.riskThreshold = origThreshold
+		cfg = origCfg
+		_ = discoverCmd.Flags().Set("risk-threshold", "100")
+		discoverCmd.Flags().Lookup("risk-threshold").Changed = false
+	})
+
+	cfg.RiskThreshold = 40
+	discoverCmd.Flags().Lookup("risk-threshold").Changed = false
+	applyConfigToDiscoverFlags(discoverCmd)
+	if discoverFlags.riskThreshold != 40 {
+		t.Fatalf("expected config risk_threshold 40 to apply when flag not set, got %d", discoverFlags.riskThreshold)
+	}
+
+	discoverFlags.riskThreshold = 75
+	discoverCmd.Flags().Lookup("risk-threshold").Changed = true
+	applyConfigToDiscoverFlags(discoverCmd)
+	if discoverFlags.riskThreshold != 75 {
+		t.Fatalf("expected explicit --risk-threshold to win over config, got %d", discoverFlags.riskThreshold)
 	}
 }
 
@@ -54,6 +82,14 @@ func TestDiscoverSelectReporter(t *testing.T) {
 	}
 	if _, ok := reporter.(*report.SARIFReporter); !ok {
 		t.Fatalf("expected SARIFReporter, got %T", reporter)
+	}
+
+	reporter, err = selectReporter("markdown", &buf)
+	if err != nil {
+		t.Fatalf("expected no error for markdown, got %v", err)
+	}
+	if _, ok := reporter.(*report.MarkdownReporter); !ok {
+		t.Fatalf("expected MarkdownReporter, got %T", reporter)
 	}
 
 	_, err = selectReporter("yaml", &buf)

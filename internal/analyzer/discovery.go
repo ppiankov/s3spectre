@@ -3,6 +3,7 @@ package analyzer
 import (
 	"fmt"
 
+	"github.com/ppiankov/s3spectre/internal/pricing"
 	"github.com/ppiankov/s3spectre/internal/s3"
 )
 
@@ -13,6 +14,7 @@ type DiscoveryConfig struct {
 	CheckEncryption         bool
 	CheckPublicAccess       bool
 	RiskScoreThreshold      int
+	EstimateCost            bool
 }
 
 // DiscoveryResult contains discovery analysis results
@@ -30,6 +32,10 @@ type BucketDiscovery struct {
 	RiskFactors     []string       `json:"risk_factors"`
 	Recommendations []string       `json:"recommendations"`
 	BucketInfo      *s3.BucketInfo `json:"bucket_info,omitempty"`
+	// EstimatedMonthlyCostUSD is an approximate monthly cost of the version
+	// overhead (TotalVersionSize minus TotalSize) for a VersionSprawl finding.
+	// Only populated when DiscoveryConfig.EstimateCost is set; 0 otherwise.
+	EstimatedMonthlyCostUSD float64 `json:"estimated_monthly_cost_usd,omitempty"`
 }
 
 // DiscoverySummary contains high-level summary
@@ -40,7 +46,11 @@ type DiscoverySummary struct {
 	RiskyBuckets    []string `json:"risky_buckets,omitempty"`
 	InactiveBuckets []string `json:"inactive_buckets,omitempty"`
 	VersionSprawl   []string `json:"version_sprawl,omitempty"`
-	TotalRegions    int      `json:"total_regions"`
+	// VersionedBuckets lists every bucket with versioning enabled, regardless
+	// of lifecycle-rule configuration -- an informational inventory, distinct
+	// from VersionSprawl (which only lists the misconfigured subset).
+	VersionedBuckets []string `json:"versioned_buckets,omitempty"`
+	TotalRegions     int      `json:"total_regions"`
 }
 
 // AnalyzeDiscovery analyzes buckets discovered from AWS
@@ -63,6 +73,10 @@ func AnalyzeDiscovery(buckets map[string]*s3.BucketInfo, config DiscoveryConfig)
 
 		// Update summary
 		result.Summary.TotalBuckets++
+
+		if info.VersioningEnabled {
+			result.Summary.VersionedBuckets = append(result.Summary.VersionedBuckets, name)
+		}
 
 		switch discovery.Status {
 		case StatusOK:
@@ -108,9 +122,17 @@ func analyzeBucketDiscovery(info *s3.BucketInfo, config DiscoveryConfig) *Bucket
 			fmt.Sprintf("Old bucket (%d days)", info.AgeInDays))
 	}
 
-	// Factor 2: Inactivity (50 points if no activity)
+	// Factor 2: Inactivity (50 points base, scaling up for severe staleness so a
+	// multi-year-inactive bucket can surface at the default risk threshold on
+	// this signal alone, instead of requiring an unrelated second factor)
 	if !managed && info.DaysSinceActivity > config.InactivityThresholdDays && config.InactivityThresholdDays > 0 {
-		discovery.RiskScore += 50
+		points := 50
+		if info.DaysSinceActivity > config.InactivityThresholdDays*5 {
+			points = 100
+		} else if info.DaysSinceActivity > config.InactivityThresholdDays*2 {
+			points = 75
+		}
+		discovery.RiskScore += points
 		discovery.RiskFactors = append(discovery.RiskFactors,
 			fmt.Sprintf("No activity for %d days", info.DaysSinceActivity))
 		discovery.Recommendations = append(discovery.Recommendations,
@@ -140,6 +162,11 @@ func analyzeBucketDiscovery(info *s3.BucketInfo, config DiscoveryConfig) *Bucket
 			"Versioning enabled without lifecycle rules")
 		discovery.Recommendations = append(discovery.Recommendations,
 			"Add lifecycle policy to expire old versions")
+
+		if config.EstimateCost && info.TotalVersionSize > info.TotalSize {
+			overhead := info.TotalVersionSize - info.TotalSize
+			discovery.EstimatedMonthlyCostUSD = pricing.MonthlyStorageCost(overhead, info.Region)
+		}
 	}
 
 	// Factor 6: No encryption (40 points) - if check enabled

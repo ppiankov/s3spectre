@@ -17,15 +17,15 @@ const (
 
 // BucketAnalysis contains analysis results for a bucket
 type BucketAnalysis struct {
-	Name              string        `json:"name"`
-	Status            Status        `json:"status"`
-	Message           string        `json:"message,omitempty"`
-	ReferencedInCode  bool          `json:"referenced_in_code"`
-	ExistsInAWS       bool          `json:"exists_in_aws"`
-	VersioningEnabled bool          `json:"versioning_enabled"`
-	LifecycleRules    int           `json:"lifecycle_rules"`
+	Name              string           `json:"name"`
+	Status            Status           `json:"status"`
+	Message           string           `json:"message,omitempty"`
+	ReferencedInCode  bool             `json:"referenced_in_code"`
+	ExistsInAWS       bool             `json:"exists_in_aws"`
+	VersioningEnabled bool             `json:"versioning_enabled"`
+	LifecycleRules    int              `json:"lifecycle_rules"`
 	Prefixes          []PrefixAnalysis `json:"prefixes,omitempty"`
-	UnusedScore       *UnusedScore  `json:"unused_score,omitempty"`
+	UnusedScore       *UnusedScore     `json:"unused_score,omitempty"`
 }
 
 // PrefixAnalysis contains analysis results for a prefix
@@ -39,14 +39,18 @@ type PrefixAnalysis struct {
 
 // Summary contains high-level analysis summary
 type Summary struct {
-	TotalBuckets         int      `json:"total_buckets"`
-	OKBuckets            int      `json:"ok_buckets"`
-	MissingBuckets       []string `json:"missing_buckets,omitempty"`
-	UnusedBuckets        []string `json:"unused_buckets,omitempty"`
-	MissingPrefixes      []string `json:"missing_prefixes,omitempty"`
-	StalePrefixes        []string `json:"stale_prefixes,omitempty"`
-	VersionSprawl        []string `json:"version_sprawl,omitempty"`
-	LifecycleMisconfig   []string `json:"lifecycle_misconfig,omitempty"`
+	TotalBuckets       int      `json:"total_buckets"`
+	OKBuckets          int      `json:"ok_buckets"`
+	MissingBuckets     []string `json:"missing_buckets,omitempty"`
+	UnusedBuckets      []string `json:"unused_buckets,omitempty"`
+	MissingPrefixes    []string `json:"missing_prefixes,omitempty"`
+	StalePrefixes      []string `json:"stale_prefixes,omitempty"`
+	VersionSprawl      []string `json:"version_sprawl,omitempty"`
+	LifecycleMisconfig []string `json:"lifecycle_misconfig,omitempty"`
+	// VersionedBuckets lists every bucket with versioning enabled, regardless
+	// of lifecycle-rule configuration -- an informational inventory, distinct
+	// from VersionSprawl (which only lists the misconfigured subset).
+	VersionedBuckets []string `json:"versioned_buckets,omitempty"`
 }
 
 // Result contains the complete analysis result
@@ -57,19 +61,19 @@ type Result struct {
 
 // Config contains analyzer configuration
 type Config struct {
-	StaleThresholdDays    int
-	UnusedThresholdDays   int
-	CheckUnused           bool
-	UnusedScoreThreshold  int
+	StaleThresholdDays   int
+	UnusedThresholdDays  int
+	CheckUnused          bool
+	UnusedScoreThreshold int
 }
 
 // UnusedScore contains scoring details for unused bucket detection
 type UnusedScore struct {
-	Total          int      `json:"total"`
-	Reasons        []string `json:"reasons"`
-	IsUnused       bool     `json:"is_unused"`
-	NotInCode      int      `json:"not_in_code"`
-	Empty          int      `json:"empty"`
-	OldBucket      int      `json:"old_bucket"`
-	DeprecatedTag  int      `json:"deprecated_tag"`
+	Total         int      `json:"total"`
+	Reasons       []string `json:"reasons"`
+	IsUnused      bool     `json:"is_unused"`
+	NotInCode     int      `json:"not_in_code"`
+	Empty         int      `json:"empty"`
+	OldBucket     int      `json:"old_bucket"`
+	DeprecatedTag int      `json:"deprecated_tag"`
 }

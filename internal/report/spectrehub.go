@@ -130,16 +130,20 @@ func (r *SpectreHubReporter) GenerateDiscovery(data DiscoveryData) error {
 			continue
 		}
 		severity := discoveryStatusSeverity(bucket.Status, bucket.RiskScore)
+		metadata := map[string]any{
+			"risk_score":      bucket.RiskScore,
+			"region":          bucket.Region,
+			"recommendations": bucket.Recommendations,
+		}
+		if bucket.EstimatedMonthlyCostUSD > 0 {
+			metadata["estimated_monthly_cost_usd"] = bucket.EstimatedMonthlyCostUSD
+		}
 		envelope.Findings = append(envelope.Findings, spectreFinding{
 			ID:       string(bucket.Status),
 			Severity: severity,
 			Location: name,
 			Message:  fmt.Sprintf("risk score %d: %v", bucket.RiskScore, bucket.RiskFactors),
-			Metadata: map[string]any{
-				"risk_score":      bucket.RiskScore,
-				"region":          bucket.Region,
-				"recommendations": bucket.Recommendations,
-			},
+			Metadata: metadata,
 		})
 		countSeverity(&envelope.Summary, severity)
 	}

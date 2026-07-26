@@ -476,6 +476,11 @@ func (i *Inspector) listAllBucketsWithMetadata(ctx context.Context, regions []st
 	bucketRegions := make(map[string]string)
 	metadata := make(map[string]*bucketMetadata)
 
+	allowedRegions := make(map[string]bool, len(regions))
+	for _, r := range regions {
+		allowedRegions[r] = true
+	}
+
 	// ListBuckets returns all buckets regardless of region
 	var result *s3.ListBucketsOutput
 	err := i.client.WithRetry(ctx, func() error {
@@ -487,24 +492,29 @@ func (i *Inspector) listAllBucketsWithMetadata(ctx context.Context, regions []st
 		return nil, nil, nil, fmt.Errorf("failed to list buckets: %w", err)
 	}
 
-	// For each bucket, store metadata and determine region
+	// For each bucket, determine its region and keep only buckets whose region
+	// is in the requested scope (regions passed by the caller, already resolved
+	// from --regions/--all-regions by determineRegions).
 	for _, bucket := range result.Buckets {
-		if bucket.Name != nil {
-			bucketName := *bucket.Name
-			buckets[bucketName] = true
-
-			// Store creation date
-			metadata[bucketName] = &bucketMetadata{
-				CreationDate: bucket.CreationDate,
-			}
-
-			// Get bucket region
-			region, err := i.getBucketRegion(ctx, bucketName)
-			if err != nil {
-				region = i.client.GetRegion() // Fallback to default
-			}
-			bucketRegions[bucketName] = region
+		if bucket.Name == nil {
+			continue
 		}
+		bucketName := *bucket.Name
+
+		region, err := i.getBucketRegion(ctx, bucketName)
+		if err != nil {
+			region = i.client.GetRegion() // Fallback to default
+		}
+
+		if len(allowedRegions) > 0 && !allowedRegions[region] {
+			continue
+		}
+
+		buckets[bucketName] = true
+		metadata[bucketName] = &bucketMetadata{
+			CreationDate: bucket.CreationDate,
+		}
+		bucketRegions[bucketName] = region
 	}
 
 	return buckets, bucketRegions, metadata, nil
@@ -610,12 +620,81 @@ func (i *Inspector) inspectBucketFull(ctx context.Context, bucket, region string
 		return err
 	})
 
+	info.Encryption = i.fetchEncryption(ctx, regionClient, bucket)
+	info.PublicAccess = i.fetchPublicAccessBlock(ctx, regionClient, bucket)
+
 	// For versioned buckets, calculate total version size and count
 	if info.VersioningEnabled {
 		i.calculateVersionSizes(ctx, regionClient, bucket, info)
 	}
 
 	return info
+}
+
+// fetchEncryption retrieves a bucket's default encryption configuration.
+// A "not configured" response is a normal state, not an error: it means
+// Enabled: false. A genuine API error (permissions, throttling, network)
+// returns nil rather than a false "disabled" default -- the tool presents
+// evidence and does not guess when it doesn't actually know the state.
+func (i *Inspector) fetchEncryption(ctx context.Context, client *Client, bucket string) *EncryptionInfo {
+	enc := &EncryptionInfo{}
+	err := client.WithRetry(ctx, func() error {
+		encResult, err := client.s3Client.GetBucketEncryption(ctx, &s3.GetBucketEncryptionInput{
+			Bucket: aws.String(bucket),
+		})
+		if err != nil && !strings.Contains(err.Error(), "ServerSideEncryptionConfigurationNotFoundError") {
+			return err
+		}
+		if err == nil && encResult.ServerSideEncryptionConfiguration != nil && len(encResult.ServerSideEncryptionConfiguration.Rules) > 0 {
+			rule := encResult.ServerSideEncryptionConfiguration.Rules[0]
+			if rule.ApplyServerSideEncryptionByDefault != nil {
+				enc.Enabled = true
+				enc.Algorithm = string(rule.ApplyServerSideEncryptionByDefault.SSEAlgorithm)
+				if rule.ApplyServerSideEncryptionByDefault.KMSMasterKeyID != nil {
+					enc.KMSMasterKeyID = *rule.ApplyServerSideEncryptionByDefault.KMSMasterKeyID
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil
+	}
+	return enc
+}
+
+// fetchPublicAccessBlock retrieves a bucket's Block Public Access configuration.
+// A "not configured" response (NoSuchPublicAccessBlockConfiguration) means none
+// of the four protections are in place, which is itself a real exposure risk --
+// IsPublic is true whenever the block configuration is not fully locked down,
+// matching the common CSPM heuristic (flagging incomplete protection coverage
+// rather than requiring proof of an actual public policy/ACL). A genuine API
+// error returns nil rather than defaulting to IsPublic=true: an access-denied
+// or throttled call must not be reported as a false-positive public-access
+// finding.
+func (i *Inspector) fetchPublicAccessBlock(ctx context.Context, client *Client, bucket string) *PublicAccessInfo {
+	pa := &PublicAccessInfo{}
+	err := client.WithRetry(ctx, func() error {
+		pabResult, err := client.s3Client.GetPublicAccessBlock(ctx, &s3.GetPublicAccessBlockInput{
+			Bucket: aws.String(bucket),
+		})
+		if err != nil && !strings.Contains(err.Error(), "NoSuchPublicAccessBlockConfiguration") {
+			return err
+		}
+		if err == nil && pabResult.PublicAccessBlockConfiguration != nil {
+			cfg := pabResult.PublicAccessBlockConfiguration
+			pa.BlockPublicAcls = aws.ToBool(cfg.BlockPublicAcls)
+			pa.IgnorePublicAcls = aws.ToBool(cfg.IgnorePublicAcls)
+			pa.BlockPublicPolicy = aws.ToBool(cfg.BlockPublicPolicy)
+			pa.RestrictPublicBuckets = aws.ToBool(cfg.RestrictPublicBuckets)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil
+	}
+	pa.IsPublic = !(pa.BlockPublicAcls && pa.IgnorePublicAcls && pa.BlockPublicPolicy && pa.RestrictPublicBuckets)
+	return pa
 }
 
 // calculateVersionSizes calculates total size of all versions in a bucket

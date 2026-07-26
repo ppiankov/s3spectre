@@ -4,7 +4,7 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/ppiankov/s3spectre)](https://goreportcard.com/report/github.com/ppiankov/s3spectre)
 [![ANCC](https://img.shields.io/badge/ANCC-compliant-brightgreen)](https://ancc.dev)
 
-**s3spectre** — S3 bucket drift and lifecycle auditor. Part of [SpectreHub](https://github.com/ppiankov/spectrehub).
+**s3spectre** — S3 bucket drift and lifecycle auditor. Part of [SpectreHub](https://spectrehub.dev).
 
 ## What it is
 
@@ -19,7 +19,7 @@
 - Not a replacement for AWS Config Rules or GuardDuty — not real-time
 - Not a data scanner — never reads object contents, only metadata
 - Not a remediation tool — reports only, never modifies buckets
-- Not a cost calculator — identifies waste, does not estimate dollars
+- Not a cost calculator by default — `--estimate-cost` gives an approximate monthly figure for version-sprawl overhead only, everything else stays unpriced
 
 ## Quick start
 
@@ -40,11 +40,15 @@ make build
 
 ### Windows
 
+Download `s3spectre_<version>_windows_amd64.zip` (or `_arm64`) from the [releases page](https://github.com/ppiankov/s3spectre/releases), extract it, and add the folder containing `s3spectre.exe` to `PATH`.
+
+Alternatively, with Go installed:
+
 ```powershell
 go install github.com/ppiankov/s3spectre/cmd/s3spectre@latest
 ```
 
-Requires Go installed and `%GOPATH%\bin` (or `%GOBIN%`) on `PATH`.
+Requires `%GOPATH%\bin` (or `%GOBIN%`) on `PATH`.
 
 ### Usage
 
@@ -62,7 +66,7 @@ s3spectre discover --region us-east-1 --format json
 
 ## SpectreHub integration
 
-s3spectre feeds S3 bucket findings into [SpectreHub](https://github.com/ppiankov/spectrehub) for unified visibility across your infrastructure.
+s3spectre feeds S3 bucket findings into [SpectreHub](https://spectrehub.dev) for unified visibility across your infrastructure.
 
 ```sh
 spectrehub collect --tool s3spectre

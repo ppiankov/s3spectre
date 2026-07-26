@@ -287,3 +287,116 @@ func TestTextReporter_RiskyBucketsSortedByRiskScore(t *testing.T) {
 		t.Fatalf("expected higher risk-score bucket (95) before lower (40) despite alphabetical order, got: %s", out)
 	}
 }
+
+// TestTextReporter_VersionedBucketsInventory guards against the new
+// informational versioned-bucket section failing to render for either scan or
+// discover output.
+func TestTextReporter_VersionedBucketsInventory_Scan(t *testing.T) {
+	setNoColor(t)
+	var buf bytes.Buffer
+	reporter := NewTextReporter(&buf)
+
+	data := Data{
+		Tool:   "s3spectre",
+		Config: Config{RepoPath: "/repo"},
+		Summary: analyzer.Summary{
+			TotalBuckets:     1,
+			VersionedBuckets: []string{"well-managed"},
+		},
+		Buckets: map[string]*analyzer.BucketAnalysis{
+			"well-managed": {Name: "well-managed", Status: analyzer.StatusOK},
+		},
+	}
+
+	if err := reporter.Generate(data); err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "Versioned Buckets") || !strings.Contains(out, "well-managed") {
+		t.Fatalf("expected versioned-buckets section with well-managed, got: %s", out)
+	}
+}
+
+func TestTextReporter_VersionedBucketsInventory_Discover(t *testing.T) {
+	setNoColor(t)
+	var buf bytes.Buffer
+	reporter := NewTextReporter(&buf)
+
+	data := DiscoveryData{
+		Tool: "s3spectre",
+		Summary: analyzer.DiscoverySummary{
+			TotalBuckets:     1,
+			VersionedBuckets: []string{"well-managed"},
+		},
+		Buckets: map[string]*analyzer.BucketDiscovery{
+			"well-managed": {Name: "well-managed", Status: analyzer.StatusOK, Region: "us-east-1"},
+		},
+	}
+
+	if err := reporter.GenerateDiscovery(data); err != nil {
+		t.Fatalf("GenerateDiscovery failed: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "Versioned Buckets") || !strings.Contains(out, "well-managed") {
+		t.Fatalf("expected versioned-buckets section with well-managed, got: %s", out)
+	}
+}
+
+func TestTextReporter_EstimatedCost_ShownWhenPresent(t *testing.T) {
+	setNoColor(t)
+	var buf bytes.Buffer
+	reporter := NewTextReporter(&buf)
+
+	data := DiscoveryData{
+		Tool: "s3spectre",
+		Summary: analyzer.DiscoverySummary{
+			TotalBuckets:  1,
+			VersionSprawl: []string{"sprawling"},
+		},
+		Buckets: map[string]*analyzer.BucketDiscovery{
+			"sprawling": {
+				Name:                    "sprawling",
+				Status:                  analyzer.StatusVersionSprawl,
+				Region:                  "us-east-1",
+				EstimatedMonthlyCostUSD: 1.23,
+			},
+		},
+	}
+
+	if err := reporter.GenerateDiscovery(data); err != nil {
+		t.Fatalf("GenerateDiscovery failed: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "Estimated Cost") || !strings.Contains(out, "$1.23/month") {
+		t.Fatalf("expected estimated cost line, got: %s", out)
+	}
+}
+
+func TestTextReporter_EstimatedCost_OmittedWhenZero(t *testing.T) {
+	setNoColor(t)
+	var buf bytes.Buffer
+	reporter := NewTextReporter(&buf)
+
+	data := DiscoveryData{
+		Tool: "s3spectre",
+		Summary: analyzer.DiscoverySummary{
+			TotalBuckets:  1,
+			VersionSprawl: []string{"sprawling"},
+		},
+		Buckets: map[string]*analyzer.BucketDiscovery{
+			"sprawling": {Name: "sprawling", Status: analyzer.StatusVersionSprawl, Region: "us-east-1"},
+		},
+	}
+
+	if err := reporter.GenerateDiscovery(data); err != nil {
+		t.Fatalf("GenerateDiscovery failed: %v", err)
+	}
+
+	out := buf.String()
+	if strings.Contains(out, "Estimated Cost") {
+		t.Fatalf("expected no estimated-cost line when EstimateCost is off, got: %s", out)
+	}
+}

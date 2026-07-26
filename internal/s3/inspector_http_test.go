@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 	"testing"
 
@@ -36,6 +37,38 @@ func newTestClient(t *testing.T, rt http.RoundTripper) *Client {
 func xmlResponse(body string) *http.Response {
 	return &http.Response{
 		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/xml"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+}
+
+func xmlErrorResponse(code, message string) *http.Response {
+	body := `<?xml version="1.0" encoding="UTF-8"?>
+<Error>
+  <Code>` + code + `</Code>
+  <Message>` + message + `</Message>
+  <BucketName>test-bucket</BucketName>
+  <RequestId>req-1</RequestId>
+  <HostId>host-1</HostId>
+</Error>`
+	return &http.Response{
+		StatusCode: http.StatusNotFound,
+		Header:     http.Header{"Content-Type": []string{"application/xml"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+}
+
+func xmlAccessDeniedResponse() *http.Response {
+	body := `<?xml version="1.0" encoding="UTF-8"?>
+<Error>
+  <Code>AccessDenied</Code>
+  <Message>Access Denied</Message>
+  <BucketName>test-bucket</BucketName>
+  <RequestId>req-1</RequestId>
+  <HostId>host-1</HostId>
+</Error>`
+	return &http.Response{
+		StatusCode: http.StatusForbidden,
 		Header:     http.Header{"Content-Type": []string{"application/xml"}},
 		Body:       io.NopCloser(strings.NewReader(body)),
 	}
@@ -183,5 +216,213 @@ func TestInspector_InspectPrefixesWithClient(t *testing.T) {
 		if !seen[prefix] {
 			t.Fatalf("missing prefix %s in results", prefix)
 		}
+	}
+}
+
+func TestInspector_FetchEncryption_Enabled(t *testing.T) {
+	encXML := `<?xml version="1.0" encoding="UTF-8"?>
+<ServerSideEncryptionConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+  <Rule>
+    <ApplyServerSideEncryptionByDefault>
+      <SSEAlgorithm>aws:kms</SSEAlgorithm>
+      <KMSMasterKeyID>arn:aws:kms:us-east-1:123456789012:key/abcd</KMSMasterKeyID>
+    </ApplyServerSideEncryptionByDefault>
+  </Rule>
+</ServerSideEncryptionConfiguration>`
+
+	rt := roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		return xmlResponse(encXML), nil
+	})
+	client := newTestClient(t, rt)
+	inspector := NewInspector(client, 1)
+
+	enc := inspector.fetchEncryption(context.Background(), client, "test-bucket")
+	if !enc.Enabled {
+		t.Fatalf("expected encryption enabled")
+	}
+	if enc.Algorithm != "aws:kms" {
+		t.Fatalf("expected algorithm aws:kms, got %q", enc.Algorithm)
+	}
+	if enc.KMSMasterKeyID == "" {
+		t.Fatalf("expected KMS key id to be populated")
+	}
+}
+
+func TestInspector_FetchEncryption_NotConfigured(t *testing.T) {
+	rt := roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		return xmlErrorResponse("ServerSideEncryptionConfigurationNotFoundError", "not found"), nil
+	})
+	client := newTestClient(t, rt)
+	inspector := NewInspector(client, 1)
+
+	enc := inspector.fetchEncryption(context.Background(), client, "test-bucket")
+	if enc == nil {
+		t.Fatalf("expected non-nil EncryptionInfo even when not configured")
+	}
+	if enc.Enabled {
+		t.Fatalf("expected encryption disabled when not configured")
+	}
+}
+
+// TestInspector_FetchEncryption_GenuineErrorReturnsNil guards against a real
+// API error (e.g. AccessDenied) being silently defaulted to Enabled=false --
+// that would misreport "no encryption" for a bucket whose actual state is
+// simply unknown because the caller lacks permission to check it.
+func TestInspector_FetchEncryption_GenuineErrorReturnsNil(t *testing.T) {
+	rt := roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		return xmlAccessDeniedResponse(), nil
+	})
+	client := newTestClient(t, rt)
+	inspector := NewInspector(client, 1)
+
+	enc := inspector.fetchEncryption(context.Background(), client, "test-bucket")
+	if enc != nil {
+		t.Fatalf("expected nil EncryptionInfo on a genuine API error, got %+v", enc)
+	}
+}
+
+func TestInspector_FetchPublicAccessBlock_FullyBlocked(t *testing.T) {
+	pabXML := `<?xml version="1.0" encoding="UTF-8"?>
+<PublicAccessBlockConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+  <BlockPublicAcls>true</BlockPublicAcls>
+  <IgnorePublicAcls>true</IgnorePublicAcls>
+  <BlockPublicPolicy>true</BlockPublicPolicy>
+  <RestrictPublicBuckets>true</RestrictPublicBuckets>
+</PublicAccessBlockConfiguration>`
+
+	rt := roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		return xmlResponse(pabXML), nil
+	})
+	client := newTestClient(t, rt)
+	inspector := NewInspector(client, 1)
+
+	pa := inspector.fetchPublicAccessBlock(context.Background(), client, "test-bucket")
+	if pa.IsPublic {
+		t.Fatalf("expected IsPublic=false when all four protections are enabled")
+	}
+}
+
+func TestInspector_FetchPublicAccessBlock_PartiallyBlocked(t *testing.T) {
+	pabXML := `<?xml version="1.0" encoding="UTF-8"?>
+<PublicAccessBlockConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+  <BlockPublicAcls>true</BlockPublicAcls>
+  <IgnorePublicAcls>true</IgnorePublicAcls>
+  <BlockPublicPolicy>false</BlockPublicPolicy>
+  <RestrictPublicBuckets>false</RestrictPublicBuckets>
+</PublicAccessBlockConfiguration>`
+
+	rt := roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		return xmlResponse(pabXML), nil
+	})
+	client := newTestClient(t, rt)
+	inspector := NewInspector(client, 1)
+
+	pa := inspector.fetchPublicAccessBlock(context.Background(), client, "test-bucket")
+	if !pa.IsPublic {
+		t.Fatalf("expected IsPublic=true when block-public-policy and restrict-public-buckets are both off")
+	}
+}
+
+func TestInspector_FetchPublicAccessBlock_NotConfigured(t *testing.T) {
+	rt := roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		return xmlErrorResponse("NoSuchPublicAccessBlockConfiguration", "not found"), nil
+	})
+	client := newTestClient(t, rt)
+	inspector := NewInspector(client, 1)
+
+	pa := inspector.fetchPublicAccessBlock(context.Background(), client, "test-bucket")
+	if !pa.IsPublic {
+		t.Fatalf("expected IsPublic=true when no public-access-block configuration exists at all")
+	}
+	if pa.BlockPublicAcls || pa.IgnorePublicAcls || pa.BlockPublicPolicy || pa.RestrictPublicBuckets {
+		t.Fatalf("expected all four protection flags false when not configured, got %+v", pa)
+	}
+}
+
+// TestInspector_FetchPublicAccessBlock_GenuineErrorReturnsNil guards against
+// the more serious version of the same bug: a real API error (e.g.
+// AccessDenied) being silently defaulted to IsPublic=true, which would report
+// a false-positive "public access enabled" finding for every bucket the
+// caller merely lacks permission to check, rather than surfacing that the
+// state is unknown.
+func TestInspector_FetchPublicAccessBlock_GenuineErrorReturnsNil(t *testing.T) {
+	rt := roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		return xmlAccessDeniedResponse(), nil
+	})
+	client := newTestClient(t, rt)
+	inspector := NewInspector(client, 1)
+
+	pa := inspector.fetchPublicAccessBlock(context.Background(), client, "test-bucket")
+	if pa != nil {
+		t.Fatalf("expected nil PublicAccessInfo on a genuine API error, got %+v", pa)
+	}
+}
+
+func listBucketsAndLocationsRoundTripper(locations map[string]string) http.RoundTripper {
+	var names []string
+	for name := range locations {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	var bucketsXML strings.Builder
+	for _, name := range names {
+		bucketsXML.WriteString("<Bucket><Name>" + name + "</Name><CreationDate>2024-01-01T00:00:00.000Z</CreationDate></Bucket>")
+	}
+	listBucketsXML := `<?xml version="1.0" encoding="UTF-8"?>
+<ListAllMyBucketsResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+  <Owner><ID>owner</ID><DisplayName>owner</DisplayName></Owner>
+  <Buckets>` + bucketsXML.String() + `</Buckets>
+</ListAllMyBucketsResult>`
+
+	return roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		if strings.Contains(req.URL.RawQuery, "location") {
+			bucket := strings.Trim(req.URL.Path, "/")
+			loc := locations[bucket]
+			body := `<?xml version="1.0" encoding="UTF-8"?>
+<LocationConstraint xmlns="http://s3.amazonaws.com/doc/2006-03-01/">` + loc + `</LocationConstraint>`
+			return xmlResponse(body), nil
+		}
+		return xmlResponse(listBucketsXML), nil
+	})
+}
+
+func TestInspector_ListAllBucketsWithMetadata_FiltersByRegion(t *testing.T) {
+	locations := map[string]string{
+		"bucket-a": "eu-central-1",
+		"bucket-b": "us-west-1",
+	}
+	client := newTestClient(t, listBucketsAndLocationsRoundTripper(locations))
+	inspector := NewInspector(client, 1)
+
+	buckets, bucketRegions, _, err := inspector.listAllBucketsWithMetadata(context.Background(), []string{"eu-central-1"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(buckets) != 1 {
+		t.Fatalf("expected 1 bucket after filtering to eu-central-1, got %d: %+v", len(buckets), buckets)
+	}
+	if !buckets["bucket-a"] {
+		t.Fatalf("expected bucket-a to survive the eu-central-1 filter, got %+v", buckets)
+	}
+	if bucketRegions["bucket-a"] != "eu-central-1" {
+		t.Fatalf("expected bucket-a region eu-central-1, got %q", bucketRegions["bucket-a"])
+	}
+}
+
+func TestInspector_ListAllBucketsWithMetadata_NoFilterWhenRegionsEmpty(t *testing.T) {
+	locations := map[string]string{
+		"bucket-a": "eu-central-1",
+		"bucket-b": "us-west-1",
+	}
+	client := newTestClient(t, listBucketsAndLocationsRoundTripper(locations))
+	inspector := NewInspector(client, 1)
+
+	buckets, _, _, err := inspector.listAllBucketsWithMetadata(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(buckets) != 2 {
+		t.Fatalf("expected both buckets with no region filter, got %d: %+v", len(buckets), buckets)
 	}
 }
