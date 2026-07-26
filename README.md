@@ -4,7 +4,7 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/ppiankov/s3spectre)](https://goreportcard.com/report/github.com/ppiankov/s3spectre)
 [![ANCC](https://img.shields.io/badge/ANCC-compliant-brightgreen)](https://ancc.dev)
 
-**s3spectre** — S3 bucket drift and lifecycle auditor. Part of [SpectreHub](https://github.com/ppiankov/spectrehub).
+**s3spectre** — S3 bucket drift and lifecycle auditor. Part of [SpectreHub](https://spectrehub.dev).
 
 ## What it is
 
@@ -66,7 +66,7 @@ s3spectre discover --region us-east-1 --format json
 
 ## SpectreHub integration
 
-s3spectre feeds S3 bucket findings into [SpectreHub](https://github.com/ppiankov/spectrehub) for unified visibility across your infrastructure.
+s3spectre feeds S3 bucket findings into [SpectreHub](https://spectrehub.dev) for unified visibility across your infrastructure.
 
 ```sh
 spectrehub collect --tool s3spectre

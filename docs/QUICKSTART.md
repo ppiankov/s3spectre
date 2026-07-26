@@ -221,7 +221,7 @@ fi
 ## Next Steps
 
 - Read the full [README.md](README.md)
-- Integrate with [SpectreHub](https://github.com/ppiankov/spectrehub)
+- Integrate with [SpectreHub](https://spectrehub.dev)
 - Check out other Spectre tools:
   - [VaultSpectre](https://github.com/ppiankov/vaultspectre)
   - [KafkaSpectre](https://github.com/ppiankov/kafkaspectre)
