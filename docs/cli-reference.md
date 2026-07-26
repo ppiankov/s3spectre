@@ -221,6 +221,7 @@ Key design decisions:
 - **Single AWS account.** Cross-account scanning is not supported.
 - **Progress line artifacts.** The TTY progress indicator uses carriage return without clearing the full line, so shorter bucket names leave trailing characters from the previous name. Cosmetic only.
 - **AWS-managed bucket names are exempt from unused/stale advice.** Buckets matching known AWS-managed naming conventions (`aws-cloudtrail-logs-*`, `aws-config-bucket-*`, `elasticloadbalancing-*`, `cf-templates-*`) never get "delete if not needed" recommendations from age, inactivity, or emptiness alone -- deleting them would break the owning AWS service. They are still flagged normally for encryption, public access, and version sprawl.
+- **Legacy region-constraint values are mapped, not guessed.** Very old buckets can still return historic `GetBucketLocation` values (e.g. `EU` for `eu-west-1`) instead of the modern region code; s3spectre maps the one AWS-documented case (`EU`) to its modern equivalent. `--regions`-scoped (and default all-regions) `discover` fails open for any other value that doesn't look like a real AWS region name -- the bucket stays visible with a logged warning instead of being silently dropped, since guessing at an unrecognized value would risk misplacing it.
 
 
 ## Roadmap

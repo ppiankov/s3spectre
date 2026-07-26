@@ -3,6 +3,8 @@ package s3
 import (
 	"context"
 	"fmt"
+	"log/slog"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -12,6 +14,28 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/ppiankov/s3spectre/internal/scanner"
 )
+
+// legacyLocationConstraints maps historic AWS S3 GetBucketLocation values to
+// their modern region codes. Buckets created before AWS standardized on
+// modern region-name constraints can still return these.
+var legacyLocationConstraints = map[string]string{
+	"EU": "eu-west-1",
+}
+
+// regionFormatPattern is a permissive format check for well-formed AWS
+// region names (e.g. us-east-1, eu-west-1, us-gov-west-1). Used to decide
+// whether a resolved bucket region looks like a real modern region string;
+// see looksLikeRegion.
+var regionFormatPattern = regexp.MustCompile(`^[a-z]{2}(-gov)?-[a-z]+-\d+$`)
+
+// looksLikeRegion reports whether region has the shape of a real AWS region
+// name. Used as a fail-open check: an unrecognized value (e.g. an unmapped
+// legacy LocationConstraint) should not be silently treated as "out of
+// scope" by region filtering -- better to keep the bucket visible than to
+// drop it based on a value we don't understand.
+func looksLikeRegion(region string) bool {
+	return regionFormatPattern.MatchString(region)
+}
 
 // ProgressCallback is called during inspection to report progress
 type ProgressCallback func(current, total int, message string)
@@ -197,7 +221,12 @@ func (i *Inspector) getBucketRegion(ctx context.Context, bucket string) (string,
 		return "us-east-1", nil
 	}
 
-	return string(locationResult.LocationConstraint), nil
+	raw := string(locationResult.LocationConstraint)
+	if modern, ok := legacyLocationConstraints[raw]; ok {
+		return modern, nil
+	}
+
+	return raw, nil
 }
 
 // inspectBucket inspects a single bucket
@@ -507,7 +536,16 @@ func (i *Inspector) listAllBucketsWithMetadata(ctx context.Context, regions []st
 		}
 
 		if len(allowedRegions) > 0 && !allowedRegions[region] {
-			continue
+			if looksLikeRegion(region) {
+				continue
+			}
+			// region doesn't match the requested scope, but also doesn't
+			// look like a real AWS region name -- likely an unmapped
+			// legacy LocationConstraint value we don't recognize. Fail
+			// open: keep the bucket visible rather than silently drop it
+			// based on a region string we can't confidently place.
+			slog.Warn("bucket resolved to an unrecognized region value; including it rather than silently excluding it from region-filtered results",
+				slog.String("bucket", bucketName), slog.String("region", region))
 		}
 
 		buckets[bucketName] = true
