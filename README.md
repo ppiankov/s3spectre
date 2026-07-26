@@ -40,11 +40,15 @@ make build
 
 ### Windows
 
+Download `s3spectre_<version>_windows_amd64.zip` (or `_arm64`) from the [releases page](https://github.com/ppiankov/s3spectre/releases), extract it, and add the folder containing `s3spectre.exe` to `PATH`.
+
+Alternatively, with Go installed:
+
 ```powershell
 go install github.com/ppiankov/s3spectre/cmd/s3spectre@latest
 ```
 
-Requires Go installed and `%GOPATH%\bin` (or `%GOBIN%`) on `PATH`.
+Requires `%GOPATH%\bin` (or `%GOBIN%`) on `PATH`.
 
 ### Usage
 

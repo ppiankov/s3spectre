@@ -22,7 +22,7 @@ make build
 ./bin/s3spectre version
 ```
 
-On Windows, use `go install github.com/ppiankov/s3spectre/cmd/s3spectre@latest` instead.
+On Windows, download `s3spectre_<version>_windows_amd64.zip` (or `_arm64`) from the [releases page](https://github.com/ppiankov/s3spectre/releases), extract `s3spectre.exe`, and add its folder to `PATH`. Alternatively, with Go installed: `go install github.com/ppiankov/s3spectre/cmd/s3spectre@latest`.
 
 ## Quick Scan
 

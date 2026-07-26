@@ -20,7 +20,9 @@ docker pull ghcr.io/ppiankov/s3spectre:latest
 git clone https://github.com/ppiankov/s3spectre.git
 cd s3spectre && make build
 
-# Windows
+# Windows: download s3spectre_<version>_windows_amd64.zip (or _arm64) from
+# https://github.com/ppiankov/s3spectre/releases, extract, add to PATH.
+# Alternatively, with Go installed:
 go install github.com/ppiankov/s3spectre/cmd/s3spectre@latest
 ```
 
