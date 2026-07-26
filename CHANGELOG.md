@@ -5,6 +5,14 @@ All notable changes to S3Spectre will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-07-26
+
+### Added
+
+- `discover --check-public` now recognizes intentionally-public bucket naming conventions (`public`, `webview`, `-cdn`, `-landing` by default, extendable via a new `public_bucket_allowlist_patterns` config key) and scores a match at reduced severity instead of full severity; a new informational `public_buckets` inventory lists every public bucket regardless of allowlist status, so nothing is dropped from evidence
+- `--estimate-cost` now also approximates the monthly USD cost of full bucket storage for buckets flagged `INACTIVE` or `UNUSED_BUCKET`, via a new `estimated_storage_cost_usd` field distinct from the existing version-sprawl-overhead-only estimate
+- `--suggest-lifecycle-policy` flag (discover) generates a deterministic JSON + Terraform lifecycle-rule suggestion for version-sprawl findings; informational only, s3spectre never calls an AWS write API
+
 ## [0.3.0] - 2026-07-26
 
 ### Added
@@ -87,7 +95,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Automatic retry with exponential backoff for transient S3 API errors
 - Enhanced error messages with actionable suggestions for common AWS failures (credentials, permissions, rate limiting)
 
-[Unreleased]: https://github.com/ppiankov/s3spectre/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/ppiankov/s3spectre/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/ppiankov/s3spectre/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/ppiankov/s3spectre/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/ppiankov/s3spectre/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/ppiankov/s3spectre/compare/v0.2.0...v0.2.1
