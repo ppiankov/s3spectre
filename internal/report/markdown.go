@@ -75,6 +75,9 @@ func (r *MarkdownReporter) GenerateDiscovery(data DiscoveryData) error {
 	writeMarkdownCountRow(r.writer, "Version Sprawl", len(data.Summary.VersionSprawl))
 	writeMarkdownCountRow(r.writer, "Versioned Buckets", len(data.Summary.VersionedBuckets))
 	writeMarkdownCountRow(r.writer, "Public Buckets", len(data.Summary.PublicBuckets))
+	if data.Summary.TotalEstimatedCostUSD > 0 {
+		fmt.Fprintf(r.writer, "| Total Estimated Cost (approximate) | $%.2f/month |\n", data.Summary.TotalEstimatedCostUSD)
+	}
 	fmt.Fprintf(r.writer, "\n")
 
 	risky := append([]string(nil), data.Summary.RiskyBuckets...)
@@ -86,8 +89,37 @@ func (r *MarkdownReporter) GenerateDiscovery(data DiscoveryData) error {
 	r.writeLifecycleSuggestions(data.Summary.VersionSprawl, data.Buckets)
 	r.writeNameListSection("Versioned Buckets", data.Summary.VersionedBuckets)
 	r.writeNameListSection("Public Buckets", data.Summary.PublicBuckets)
+	r.writeTagRollup(data.Summary.TagRollup)
 
 	return nil
+}
+
+// writeTagRollup renders the --group-by-tag ownership rollup as a Markdown
+// table, sorted by descending risk score.
+func (r *MarkdownReporter) writeTagRollup(rollup map[string]*analyzer.TagGroupSummary) {
+	if len(rollup) == 0 {
+		return
+	}
+	keys := make([]string, 0, len(rollup))
+	for k := range rollup {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		gi, gj := rollup[keys[i]], rollup[keys[j]]
+		if gi.RiskScore != gj.RiskScore {
+			return gi.RiskScore > gj.RiskScore
+		}
+		return keys[i] < keys[j]
+	})
+
+	fmt.Fprintf(r.writer, "## Rollup by tag\n\n")
+	fmt.Fprintf(r.writer, "| Tag | Buckets | Risk Score | Unused | Risky | Inactive | Version Sprawl |\n|---|---|---|---|---|---|---|\n")
+	for _, k := range keys {
+		g := rollup[k]
+		fmt.Fprintf(r.writer, "| %s | %d | %d | %d | %d | %d | %d |\n",
+			k, g.BucketCount, g.RiskScore, g.UnusedCount, g.RiskyCount, g.InactiveCount, g.VersionSprawlCount)
+	}
+	fmt.Fprintf(r.writer, "\n")
 }
 
 func writeMarkdownCountRow(w io.Writer, label string, count int) {

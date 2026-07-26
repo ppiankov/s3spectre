@@ -2,6 +2,7 @@ package analyzer
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/ppiankov/s3spectre/internal/pricing"
 	"github.com/ppiankov/s3spectre/internal/remediation"
@@ -24,6 +25,10 @@ type DiscoveryConfig struct {
 	// findings. Informational only -- s3spectre never calls any AWS write
 	// API itself.
 	SuggestLifecyclePolicy bool
+	// GroupByTag, when non-empty, names a bucket tag key (e.g. "Team") to
+	// roll the discover summary up by. Buckets missing the tag are grouped
+	// under "untagged". Empty disables the rollup.
+	GroupByTag string
 }
 
 // DiscoveryResult contains discovery analysis results
@@ -95,7 +100,31 @@ type DiscoverySummary struct {
 	// scoring).
 	PublicBuckets []string `json:"public_buckets,omitempty"`
 	TotalRegions  int      `json:"total_regions"`
+	// TotalEstimatedCostUSD sums CostUSD() across every bucket. Only
+	// meaningful when DiscoveryConfig.EstimateCost is set; naturally 0
+	// otherwise since every bucket's cost fields stay 0 in that case.
+	TotalEstimatedCostUSD float64 `json:"total_estimated_cost_usd,omitempty"`
+	// TagRollup groups buckets by the DiscoveryConfig.GroupByTag key,
+	// summing bucket count and risk score per tag value. Buckets missing
+	// the tag land under "untagged". Only populated when GroupByTag is set.
+	TagRollup map[string]*TagGroupSummary `json:"tag_rollup,omitempty"`
 }
+
+// TagGroupSummary is a per-tag-value rollup of discover findings, used by
+// DiscoverySummary.TagRollup to give an ownership view across a large
+// account instead of a single flat bucket list.
+type TagGroupSummary struct {
+	BucketCount        int `json:"bucket_count"`
+	RiskScore          int `json:"risk_score"`
+	UnusedCount        int `json:"unused_count"`
+	RiskyCount         int `json:"risky_count"`
+	InactiveCount      int `json:"inactive_count"`
+	VersionSprawlCount int `json:"version_sprawl_count"`
+}
+
+// untaggedGroupKey is the rollup bucket for buckets missing the configured
+// GroupByTag key.
+const untaggedGroupKey = "untagged"
 
 // AnalyzeDiscovery analyzes buckets discovered from AWS
 func AnalyzeDiscovery(buckets map[string]*s3.BucketInfo, config DiscoveryConfig) *DiscoveryResult {
@@ -126,6 +155,10 @@ func AnalyzeDiscovery(buckets map[string]*s3.BucketInfo, config DiscoveryConfig)
 			result.Summary.PublicBuckets = append(result.Summary.PublicBuckets, name)
 		}
 
+		if config.EstimateCost {
+			result.Summary.TotalEstimatedCostUSD += discovery.CostUSD()
+		}
+
 		switch discovery.Status {
 		case StatusOK:
 			result.Summary.HealthyBuckets++
@@ -138,10 +171,52 @@ func AnalyzeDiscovery(buckets map[string]*s3.BucketInfo, config DiscoveryConfig)
 		case StatusVersionSprawl:
 			result.Summary.VersionSprawl = append(result.Summary.VersionSprawl, name)
 		}
+
+		if config.GroupByTag != "" {
+			addToTagRollup(&result.Summary, config.GroupByTag, info, discovery)
+		}
 	}
 
 	result.Summary.TotalRegions = len(regions)
 	return result
+}
+
+// isDefaultKMSKey reports whether kmsKeyID refers to the AWS-managed default
+// S3 KMS key (alias/aws/s3), as opposed to a customer-managed KMS key (CMK).
+// The default key's ARN/alias always ends in "alias/aws/s3" regardless of
+// account or region.
+func isDefaultKMSKey(kmsKeyID string) bool {
+	return strings.HasSuffix(kmsKeyID, "alias/aws/s3")
+}
+
+// addToTagRollup adds a single bucket's finding data to the summary's
+// TagRollup, keyed by the value of the tagKey bucket tag (or "untagged" if
+// the bucket has no such tag).
+func addToTagRollup(summary *DiscoverySummary, tagKey string, info *s3.BucketInfo, discovery *BucketDiscovery) {
+	if summary.TagRollup == nil {
+		summary.TagRollup = make(map[string]*TagGroupSummary)
+	}
+	value := info.Tags[tagKey]
+	if value == "" {
+		value = untaggedGroupKey
+	}
+	group, ok := summary.TagRollup[value]
+	if !ok {
+		group = &TagGroupSummary{}
+		summary.TagRollup[value] = group
+	}
+	group.BucketCount++
+	group.RiskScore += discovery.RiskScore
+	switch discovery.Status {
+	case StatusUnusedBucket:
+		group.UnusedCount++
+	case StatusRisky:
+		group.RiskyCount++
+	case StatusInactive:
+		group.InactiveCount++
+	case StatusVersionSprawl:
+		group.VersionSprawlCount++
+	}
 }
 
 // analyzeBucketDiscovery analyzes a single bucket
@@ -222,12 +297,21 @@ func analyzeBucketDiscovery(info *s3.BucketInfo, config DiscoveryConfig) *Bucket
 		}
 	}
 
-	// Factor 6: No encryption (40 points) - if check enabled
-	if config.CheckEncryption && info.Encryption != nil && !info.Encryption.Enabled {
-		discovery.RiskScore += 40
-		discovery.RiskFactors = append(discovery.RiskFactors, "No encryption enabled")
-		discovery.Recommendations = append(discovery.Recommendations,
-			"Enable default encryption (AES256 or KMS)")
+	// Factor 6: No encryption (40 points), or default-KMS-key granularity
+	// (15 points) - if check enabled
+	if config.CheckEncryption && info.Encryption != nil {
+		if !info.Encryption.Enabled {
+			discovery.RiskScore += 40
+			discovery.RiskFactors = append(discovery.RiskFactors, "No encryption enabled")
+			discovery.Recommendations = append(discovery.Recommendations,
+				"Enable default encryption (AES256 or KMS)")
+		} else if info.Encryption.Algorithm == "aws:kms" && isDefaultKMSKey(info.Encryption.KMSMasterKeyID) {
+			discovery.RiskScore += 15
+			discovery.RiskFactors = append(discovery.RiskFactors,
+				"Encrypted with the default AWS-managed KMS key, not a customer-managed key")
+			discovery.Recommendations = append(discovery.Recommendations,
+				"Consider a customer-managed KMS key (CMK) if your compliance framework requires key rotation/access control the default key doesn't provide")
+		}
 	}
 
 	// Factor 7: Public access (60 points - high risk, halved to 30 for

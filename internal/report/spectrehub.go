@@ -40,6 +40,12 @@ type spectreSummary struct {
 	Medium int `json:"medium"`
 	Low    int `json:"low"`
 	Info   int `json:"info"`
+	// TotalEstimatedCostUSD mirrors analyzer.DiscoverySummary.TotalEstimatedCostUSD;
+	// only nonzero for discover reports with --estimate-cost enabled.
+	TotalEstimatedCostUSD float64 `json:"total_estimated_cost_usd,omitempty"`
+	// TagRollup mirrors analyzer.DiscoverySummary.TagRollup; only populated
+	// for discover reports with --group-by-tag enabled.
+	TagRollup map[string]*analyzer.TagGroupSummary `json:"tag_rollup,omitempty"`
 }
 
 // HashRegion produces a sha256 hash of an AWS region/profile for target identification.
@@ -152,6 +158,8 @@ func (r *SpectreHubReporter) GenerateDiscovery(data DiscoveryData) error {
 	}
 
 	envelope.Summary.Total = len(envelope.Findings)
+	envelope.Summary.TotalEstimatedCostUSD = data.Summary.TotalEstimatedCostUSD
+	envelope.Summary.TagRollup = data.Summary.TagRollup
 	if envelope.Findings == nil {
 		envelope.Findings = []spectreFinding{}
 	}

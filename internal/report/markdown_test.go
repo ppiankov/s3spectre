@@ -225,3 +225,32 @@ func TestMarkdownReporter_EscapesPipeInTableCells(t *testing.T) {
 		t.Fatalf("expected escaped pipe character in table cell, got: %s", out)
 	}
 }
+
+func TestMarkdownReporter_GenerateDiscovery_TotalCostAndTagRollup(t *testing.T) {
+	var buf bytes.Buffer
+	reporter := NewMarkdownReporter(&buf)
+
+	data := DiscoveryData{
+		Tool: "s3spectre",
+		Summary: analyzer.DiscoverySummary{
+			TotalBuckets:          2,
+			TotalEstimatedCostUSD: 11.99,
+			TagRollup: map[string]*analyzer.TagGroupSummary{
+				"backend":  {BucketCount: 2, RiskScore: 150},
+				"untagged": {BucketCount: 1, RiskScore: 30},
+			},
+		},
+	}
+
+	if err := reporter.GenerateDiscovery(data); err != nil {
+		t.Fatalf("GenerateDiscovery failed: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "$11.99/month") {
+		t.Fatalf("expected total estimated cost row, got: %s", out)
+	}
+	if !strings.Contains(out, "## Rollup by tag") || !strings.Contains(out, "backend") || !strings.Contains(out, "untagged") {
+		t.Fatalf("expected a Rollup by tag section with both groups, got: %s", out)
+	}
+}

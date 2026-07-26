@@ -746,3 +746,246 @@ func TestAnalyzeBucketDiscovery_LifecycleSuggestion_OnlyWhenEnabledAndSprawling(
 		t.Fatal("expected no lifecycle suggestion for a bucket with no version-sprawl finding")
 	}
 }
+
+// TestAnalyzeDiscovery_TotalEstimatedCostUSD_SumsAcrossBuckets guards the
+// WO-45 rollup: the account-level total must equal the sum of every
+// bucket's CostUSD(), not just one bucket's figure.
+func TestAnalyzeDiscovery_TotalEstimatedCostUSD_SumsAcrossBuckets(t *testing.T) {
+	buckets := map[string]*s3.BucketInfo{
+		"sprawling": {
+			Name:              "sprawling",
+			Region:            "us-east-1",
+			VersioningEnabled: true,
+			LifecycleRules:    0,
+			TotalSize:         1 * 1024 * 1024 * 1024,
+			TotalVersionSize:  11 * 1024 * 1024 * 1024,
+		},
+		"stale": {
+			Name:              "stale",
+			Region:            "us-east-1",
+			DaysSinceActivity: 1000,
+			TotalSize:         5 * 1024 * 1024 * 1024,
+		},
+	}
+	config := DiscoveryConfig{
+		InactivityThresholdDays: 180,
+		RiskScoreThreshold:      50,
+		EstimateCost:            true,
+	}
+
+	result := AnalyzeDiscovery(buckets, config)
+
+	sprawlCost := result.Buckets["sprawling"].CostUSD()
+	staleCost := result.Buckets["stale"].CostUSD()
+	if sprawlCost <= 0 || staleCost <= 0 {
+		t.Fatalf("expected both buckets to have a nonzero cost estimate, got sprawl=%v stale=%v", sprawlCost, staleCost)
+	}
+	want := sprawlCost + staleCost
+	if result.Summary.TotalEstimatedCostUSD != want {
+		t.Fatalf("expected TotalEstimatedCostUSD=%v (sum of per-bucket costs), got %v", want, result.Summary.TotalEstimatedCostUSD)
+	}
+}
+
+// TestAnalyzeDiscovery_TotalEstimatedCostUSD_ZeroWhenDisabled guards against
+// the rollup implying pricing coverage the tool doesn't have when
+// --estimate-cost was never passed.
+func TestAnalyzeDiscovery_TotalEstimatedCostUSD_ZeroWhenDisabled(t *testing.T) {
+	buckets := map[string]*s3.BucketInfo{
+		"sprawling": {
+			Name:              "sprawling",
+			VersioningEnabled: true,
+			LifecycleRules:    0,
+			TotalSize:         1 * 1024 * 1024 * 1024,
+			TotalVersionSize:  11 * 1024 * 1024 * 1024,
+		},
+	}
+	config := DiscoveryConfig{RiskScoreThreshold: 100} // EstimateCost left false
+
+	result := AnalyzeDiscovery(buckets, config)
+
+	if result.Summary.TotalEstimatedCostUSD != 0 {
+		t.Fatalf("expected TotalEstimatedCostUSD=0 when EstimateCost is off, got %v", result.Summary.TotalEstimatedCostUSD)
+	}
+}
+
+func TestAnalyzeDiscovery_GroupByTag_Disabled(t *testing.T) {
+	buckets := map[string]*s3.BucketInfo{
+		"a": {Name: "a", Tags: map[string]string{"Team": "backend"}},
+	}
+	result := AnalyzeDiscovery(buckets, DiscoveryConfig{RiskScoreThreshold: 100})
+
+	if result.Summary.TagRollup != nil {
+		t.Fatalf("expected no TagRollup when GroupByTag is empty, got %v", result.Summary.TagRollup)
+	}
+}
+
+// TestAnalyzeDiscovery_GroupByTag_AggregatesByValue guards the core WO-46
+// behavior: buckets sharing a tag value must aggregate bucket count and
+// summed risk score under that one tag value.
+func TestAnalyzeDiscovery_GroupByTag_AggregatesByValue(t *testing.T) {
+	buckets := map[string]*s3.BucketInfo{
+		"a": {Name: "a", Tags: map[string]string{"Team": "backend"}, IsEmpty: true, DaysSinceActivity: 200},
+		"b": {Name: "b", Tags: map[string]string{"Team": "backend"}, AgeInDays: 500},
+		"c": {Name: "c", Tags: map[string]string{"Team": "frontend"}, AgeInDays: 500},
+	}
+	config := DiscoveryConfig{
+		AgeThresholdDays:        365,
+		InactivityThresholdDays: 180,
+		RiskScoreThreshold:      100,
+		GroupByTag:              "Team",
+	}
+
+	result := AnalyzeDiscovery(buckets, config)
+
+	backend, ok := result.Summary.TagRollup["backend"]
+	if !ok {
+		t.Fatal("expected a 'backend' rollup entry")
+	}
+	if backend.BucketCount != 2 {
+		t.Fatalf("expected 2 buckets under 'backend', got %d", backend.BucketCount)
+	}
+	wantRisk := result.Buckets["a"].RiskScore + result.Buckets["b"].RiskScore
+	if backend.RiskScore != wantRisk {
+		t.Fatalf("expected summed risk score %d for 'backend', got %d", wantRisk, backend.RiskScore)
+	}
+
+	frontend, ok := result.Summary.TagRollup["frontend"]
+	if !ok || frontend.BucketCount != 1 {
+		t.Fatalf("expected 1 bucket under 'frontend', got %+v", frontend)
+	}
+}
+
+// TestAnalyzeDiscovery_GroupByTag_MissingTagGoesToUntagged guards against a
+// bucket without the configured tag being silently dropped from the rollup
+// instead of landing in an explicit "untagged" bucket.
+func TestAnalyzeDiscovery_GroupByTag_MissingTagGoesToUntagged(t *testing.T) {
+	buckets := map[string]*s3.BucketInfo{
+		"no-team-tag":    {Name: "no-team-tag", Tags: map[string]string{"Environment": "prod"}},
+		"no-tags-at-all": {Name: "no-tags-at-all"},
+	}
+	config := DiscoveryConfig{RiskScoreThreshold: 100, GroupByTag: "Team"}
+
+	result := AnalyzeDiscovery(buckets, config)
+
+	untagged, ok := result.Summary.TagRollup["untagged"]
+	if !ok {
+		t.Fatal("expected an 'untagged' rollup entry")
+	}
+	if untagged.BucketCount != 2 {
+		t.Fatalf("expected 2 buckets under 'untagged', got %d", untagged.BucketCount)
+	}
+}
+
+func TestIsDefaultKMSKey(t *testing.T) {
+	cases := []struct {
+		keyID string
+		want  bool
+	}{
+		{"arn:aws:kms:eu-central-1:123456789012:alias/aws/s3", true},
+		{"alias/aws/s3", true},
+		{"arn:aws:kms:eu-central-1:123456789012:key/1234abcd-12ab-34cd-56ef-1234567890ab", false},
+		{"arn:aws:kms:eu-central-1:123456789012:alias/my-custom-key", false},
+		{"", false},
+	}
+	for _, tt := range cases {
+		if got := isDefaultKMSKey(tt.keyID); got != tt.want {
+			t.Errorf("isDefaultKMSKey(%q) = %v, want %v", tt.keyID, got, tt.want)
+		}
+	}
+}
+
+func TestAnalyzeBucketDiscovery_DefaultKMSKey_ReducedFactor(t *testing.T) {
+	info := &s3.BucketInfo{
+		Name: "kms-default",
+		Encryption: &s3.EncryptionInfo{
+			Enabled:        true,
+			Algorithm:      "aws:kms",
+			KMSMasterKeyID: "arn:aws:kms:eu-central-1:123456789012:alias/aws/s3",
+		},
+	}
+	config := DiscoveryConfig{CheckEncryption: true, RiskScoreThreshold: 100}
+
+	d := analyzeBucketDiscovery(info, config)
+
+	if d.RiskScore != 15 {
+		t.Fatalf("expected risk score 15 for default-KMS-key bucket, got %d", d.RiskScore)
+	}
+}
+
+func TestAnalyzeBucketDiscovery_CustomerManagedKMSKey_NoFactor(t *testing.T) {
+	info := &s3.BucketInfo{
+		Name: "kms-cmk",
+		Encryption: &s3.EncryptionInfo{
+			Enabled:        true,
+			Algorithm:      "aws:kms",
+			KMSMasterKeyID: "arn:aws:kms:eu-central-1:123456789012:key/1234abcd-12ab-34cd-56ef-1234567890ab",
+		},
+	}
+	config := DiscoveryConfig{CheckEncryption: true, RiskScoreThreshold: 100}
+
+	d := analyzeBucketDiscovery(info, config)
+
+	if d.RiskScore != 0 {
+		t.Fatalf("expected risk score 0 for customer-managed-key bucket, got %d", d.RiskScore)
+	}
+}
+
+// TestAnalyzeBucketDiscovery_SSES3_NoDefaultKeyFactor guards against SSE-S3
+// (AES256, no KMS at all) being mistakenly flagged by the CMK-vs-default
+// check, which only applies to aws:kms.
+func TestAnalyzeBucketDiscovery_SSES3_NoDefaultKeyFactor(t *testing.T) {
+	info := &s3.BucketInfo{
+		Name: "sse-s3",
+		Encryption: &s3.EncryptionInfo{
+			Enabled:   true,
+			Algorithm: "AES256",
+		},
+	}
+	config := DiscoveryConfig{CheckEncryption: true, RiskScoreThreshold: 100}
+
+	d := analyzeBucketDiscovery(info, config)
+
+	if d.RiskScore != 0 {
+		t.Fatalf("expected risk score 0 for SSE-S3 bucket (no CMK expectation), got %d", d.RiskScore)
+	}
+}
+
+// TestAnalyzeBucketDiscovery_NoEncryption_UnaffectedByKMSCheck guards
+// against the new default-key factor firing (or double-firing) alongside
+// the existing no-encryption factor.
+func TestAnalyzeBucketDiscovery_NoEncryption_UnaffectedByKMSCheck(t *testing.T) {
+	info := &s3.BucketInfo{
+		Name:       "unencrypted",
+		Encryption: &s3.EncryptionInfo{Enabled: false},
+	}
+	config := DiscoveryConfig{CheckEncryption: true, RiskScoreThreshold: 100}
+
+	d := analyzeBucketDiscovery(info, config)
+
+	if d.RiskScore != 40 {
+		t.Fatalf("expected risk score 40 (no-encryption factor only, no double count with KMS factor), got %d", d.RiskScore)
+	}
+}
+
+// TestAnalyzeDiscovery_GroupByTag_LiteralUntaggedValueCollidesWithFallback
+// pins a known, accepted edge case: a bucket tagged with the literal value
+// "untagged" merges into the same rollup entry as buckets genuinely missing
+// the tag. This is documented in cli-reference.md as an accepted limitation
+// rather than disambiguated -- this test exists so a future change to the
+// merge behavior is a deliberate decision, not a silent regression.
+func TestAnalyzeDiscovery_GroupByTag_LiteralUntaggedValueCollidesWithFallback(t *testing.T) {
+	buckets := map[string]*s3.BucketInfo{
+		"literally-tagged-untagged": {Name: "literally-tagged-untagged", Tags: map[string]string{"Team": "untagged"}},
+		"missing-tag-entirely":      {Name: "missing-tag-entirely"},
+	}
+	config := DiscoveryConfig{RiskScoreThreshold: 100, GroupByTag: "Team"}
+
+	result := AnalyzeDiscovery(buckets, config)
+
+	if len(result.Summary.TagRollup) != 1 {
+		t.Fatalf("expected the literal 'untagged' tag value to collide with the missing-tag fallback into one entry, got %d entries: %v", len(result.Summary.TagRollup), result.Summary.TagRollup)
+	}
+	if g := result.Summary.TagRollup["untagged"]; g == nil || g.BucketCount != 2 {
+		t.Fatalf("expected both buckets merged under 'untagged', got %+v", result.Summary.TagRollup["untagged"])
+	}
+}

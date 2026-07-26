@@ -36,6 +36,9 @@ func TestDiscoverFlagDefaults(t *testing.T) {
 	if discoverCmd.Flags().Lookup("suggest-lifecycle-policy").DefValue != "false" {
 		t.Fatalf("expected flag default suggest-lifecycle-policy false, got %q", discoverCmd.Flags().Lookup("suggest-lifecycle-policy").DefValue)
 	}
+	if discoverCmd.Flags().Lookup("group-by-tag").DefValue != "" {
+		t.Fatalf("expected flag default group-by-tag empty, got %q", discoverCmd.Flags().Lookup("group-by-tag").DefValue)
+	}
 }
 
 // TestRunDiscover_ConfigWiring verifies the analyzer.DiscoveryConfig built in
@@ -46,15 +49,18 @@ func TestRunDiscover_ConfigWiring(t *testing.T) {
 	origCfg := cfg
 	origSuggest := discoverFlags.suggestLifecycle
 	origEstimate := discoverFlags.estimateCost
+	origGroupByTag := discoverFlags.groupByTag
 	t.Cleanup(func() {
 		cfg = origCfg
 		discoverFlags.suggestLifecycle = origSuggest
 		discoverFlags.estimateCost = origEstimate
+		discoverFlags.groupByTag = origGroupByTag
 	})
 
 	cfg.PublicBucketAllowlistPatterns = []string{"my-custom-pattern"}
 	discoverFlags.suggestLifecycle = true
 	discoverFlags.estimateCost = true
+	discoverFlags.groupByTag = "Team"
 
 	config := buildDiscoveryConfig()
 	if len(config.PublicBucketAllowlistPatterns) != 1 || config.PublicBucketAllowlistPatterns[0] != "my-custom-pattern" {
@@ -65,6 +71,9 @@ func TestRunDiscover_ConfigWiring(t *testing.T) {
 	}
 	if !config.EstimateCost {
 		t.Fatal("expected EstimateCost to wire through from the flag")
+	}
+	if config.GroupByTag != "Team" {
+		t.Fatalf("expected GroupByTag to wire through from the flag, got %q", config.GroupByTag)
 	}
 }
 
