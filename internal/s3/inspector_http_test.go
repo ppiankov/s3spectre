@@ -1,8 +1,10 @@
 package s3
 
 import (
+	"bytes"
 	"context"
 	"io"
+	"log/slog"
 	"net/http"
 	"sort"
 	"strings"
@@ -424,5 +426,145 @@ func TestInspector_ListAllBucketsWithMetadata_NoFilterWhenRegionsEmpty(t *testin
 	}
 	if len(buckets) != 2 {
 		t.Fatalf("expected both buckets with no region filter, got %d: %+v", len(buckets), buckets)
+	}
+}
+
+func TestLooksLikeRegion(t *testing.T) {
+	cases := []struct {
+		region string
+		want   bool
+	}{
+		{"us-east-1", true},
+		{"eu-west-1", true},
+		{"ap-southeast-2", true},
+		{"us-gov-west-1", true},
+		{"EU", false},
+		{"", false},
+		{"not-a-region", false},
+	}
+	for _, tt := range cases {
+		if got := looksLikeRegion(tt.region); got != tt.want {
+			t.Errorf("looksLikeRegion(%q) = %v, want %v", tt.region, got, tt.want)
+		}
+	}
+}
+
+// TestGetBucketRegion_LegacyEUConstraint_MapsToModernRegion guards the core
+// WO-41 fix: a bucket whose GetBucketLocation call returns the historic "EU"
+// constraint value must resolve to eu-west-1, not the raw "EU" string.
+func TestGetBucketRegion_LegacyEUConstraint_MapsToModernRegion(t *testing.T) {
+	rt := roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		body := `<?xml version="1.0" encoding="UTF-8"?>
+<LocationConstraint xmlns="http://s3.amazonaws.com/doc/2006-03-01/">EU</LocationConstraint>`
+		return xmlResponse(body), nil
+	})
+	client := newTestClient(t, rt)
+	inspector := NewInspector(client, 1)
+
+	region, err := inspector.getBucketRegion(context.Background(), "legacy-eu-bucket")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if region != "eu-west-1" {
+		t.Fatalf("expected legacy 'EU' constraint to resolve to eu-west-1, got %q", region)
+	}
+}
+
+// TestGetBucketRegion_EmptyConstraint_MapsToUsEast1 pins the pre-existing
+// empty-string special case (us-east-1's GetBucketLocation returns an empty
+// LocationConstraint), confirming this WO's legacy-map addition -- which
+// sits right after this check in the same function -- doesn't regress it.
+func TestGetBucketRegion_EmptyConstraint_MapsToUsEast1(t *testing.T) {
+	rt := roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		body := `<?xml version="1.0" encoding="UTF-8"?>
+<LocationConstraint xmlns="http://s3.amazonaws.com/doc/2006-03-01/"></LocationConstraint>`
+		return xmlResponse(body), nil
+	})
+	client := newTestClient(t, rt)
+	inspector := NewInspector(client, 1)
+
+	region, err := inspector.getBucketRegion(context.Background(), "us-east-1-bucket")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if region != "us-east-1" {
+		t.Fatalf("expected empty LocationConstraint to resolve to us-east-1, got %q", region)
+	}
+}
+
+// TestInspector_ListAllBucketsWithMetadata_LegacyEUConstraint_SurvivesRegionFilter
+// is the end-to-end WO-41 regression: before the fix, a bucket resolving to
+// the raw "EU" string would never match a modern region name like
+// "eu-west-1" in allowedRegions and would be silently dropped.
+func TestInspector_ListAllBucketsWithMetadata_LegacyEUConstraint_SurvivesRegionFilter(t *testing.T) {
+	locations := map[string]string{
+		"legacy-eu-bucket": "EU",
+		"other-bucket":     "us-west-1",
+	}
+	client := newTestClient(t, listBucketsAndLocationsRoundTripper(locations))
+	inspector := NewInspector(client, 1)
+
+	buckets, bucketRegions, _, err := inspector.listAllBucketsWithMetadata(context.Background(), []string{"eu-west-1"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !buckets["legacy-eu-bucket"] {
+		t.Fatalf("expected the legacy-EU bucket to survive an eu-west-1 filter, got %+v", buckets)
+	}
+	if bucketRegions["legacy-eu-bucket"] != "eu-west-1" {
+		t.Fatalf("expected resolved region eu-west-1, got %q", bucketRegions["legacy-eu-bucket"])
+	}
+	if buckets["other-bucket"] {
+		t.Fatalf("expected the us-west-1 bucket to still be correctly excluded, got %+v", buckets)
+	}
+}
+
+// TestInspector_ListAllBucketsWithMetadata_UnrecognizedRegion_FailsOpen guards
+// the general safety net: a bucket resolving to some region-like string we
+// don't recognize at all (not empty, not a mapped legacy constraint, not
+// shaped like a real AWS region) must still appear in output rather than
+// being silently excluded, with a warning logged.
+func TestInspector_ListAllBucketsWithMetadata_UnrecognizedRegion_FailsOpen(t *testing.T) {
+	var logBuf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	oldLogger := slog.Default()
+	slog.SetDefault(logger)
+	t.Cleanup(func() { slog.SetDefault(oldLogger) })
+
+	locations := map[string]string{
+		"weird-legacy-bucket": "SomeUnrecognizedConstraint",
+	}
+	client := newTestClient(t, listBucketsAndLocationsRoundTripper(locations))
+	inspector := NewInspector(client, 1)
+
+	buckets, _, _, err := inspector.listAllBucketsWithMetadata(context.Background(), []string{"us-east-1"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !buckets["weird-legacy-bucket"] {
+		t.Fatalf("expected the unrecognized-region bucket to fail open (be included), got %+v", buckets)
+	}
+	if !strings.Contains(logBuf.String(), "unrecognized region value") {
+		t.Fatalf("expected a warning to be logged for the unrecognized region, got log output: %q", logBuf.String())
+	}
+}
+
+// TestInspector_ListAllBucketsWithMetadata_WellFormedOutOfScopeRegion_StillExcluded
+// guards against the fail-open fix becoming a blanket bypass: a bucket that
+// resolves to a real, well-formed AWS region simply outside the requested
+// scope must still be excluded as before.
+func TestInspector_ListAllBucketsWithMetadata_WellFormedOutOfScopeRegion_StillExcluded(t *testing.T) {
+	locations := map[string]string{
+		"out-of-scope-bucket": "ap-southeast-2",
+	}
+	client := newTestClient(t, listBucketsAndLocationsRoundTripper(locations))
+	inspector := NewInspector(client, 1)
+
+	buckets, _, _, err := inspector.listAllBucketsWithMetadata(context.Background(), []string{"us-east-1"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if buckets["out-of-scope-bucket"] {
+		t.Fatalf("expected a well-formed but out-of-scope region to still be excluded, got %+v", buckets)
 	}
 }
