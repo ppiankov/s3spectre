@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 	"testing"
 
@@ -302,5 +303,74 @@ func TestInspector_FetchPublicAccessBlock_NotConfigured(t *testing.T) {
 	}
 	if pa.BlockPublicAcls || pa.IgnorePublicAcls || pa.BlockPublicPolicy || pa.RestrictPublicBuckets {
 		t.Fatalf("expected all four protection flags false when not configured, got %+v", pa)
+	}
+}
+
+func listBucketsAndLocationsRoundTripper(locations map[string]string) http.RoundTripper {
+	var names []string
+	for name := range locations {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	var bucketsXML strings.Builder
+	for _, name := range names {
+		bucketsXML.WriteString("<Bucket><Name>" + name + "</Name><CreationDate>2024-01-01T00:00:00.000Z</CreationDate></Bucket>")
+	}
+	listBucketsXML := `<?xml version="1.0" encoding="UTF-8"?>
+<ListAllMyBucketsResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+  <Owner><ID>owner</ID><DisplayName>owner</DisplayName></Owner>
+  <Buckets>` + bucketsXML.String() + `</Buckets>
+</ListAllMyBucketsResult>`
+
+	return roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		if strings.Contains(req.URL.RawQuery, "location") {
+			bucket := strings.Trim(req.URL.Path, "/")
+			loc := locations[bucket]
+			body := `<?xml version="1.0" encoding="UTF-8"?>
+<LocationConstraint xmlns="http://s3.amazonaws.com/doc/2006-03-01/">` + loc + `</LocationConstraint>`
+			return xmlResponse(body), nil
+		}
+		return xmlResponse(listBucketsXML), nil
+	})
+}
+
+func TestInspector_ListAllBucketsWithMetadata_FiltersByRegion(t *testing.T) {
+	locations := map[string]string{
+		"bucket-a": "eu-central-1",
+		"bucket-b": "us-west-1",
+	}
+	client := newTestClient(t, listBucketsAndLocationsRoundTripper(locations))
+	inspector := NewInspector(client, 1)
+
+	buckets, bucketRegions, _, err := inspector.listAllBucketsWithMetadata(context.Background(), []string{"eu-central-1"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(buckets) != 1 {
+		t.Fatalf("expected 1 bucket after filtering to eu-central-1, got %d: %+v", len(buckets), buckets)
+	}
+	if !buckets["bucket-a"] {
+		t.Fatalf("expected bucket-a to survive the eu-central-1 filter, got %+v", buckets)
+	}
+	if bucketRegions["bucket-a"] != "eu-central-1" {
+		t.Fatalf("expected bucket-a region eu-central-1, got %q", bucketRegions["bucket-a"])
+	}
+}
+
+func TestInspector_ListAllBucketsWithMetadata_NoFilterWhenRegionsEmpty(t *testing.T) {
+	locations := map[string]string{
+		"bucket-a": "eu-central-1",
+		"bucket-b": "us-west-1",
+	}
+	client := newTestClient(t, listBucketsAndLocationsRoundTripper(locations))
+	inspector := NewInspector(client, 1)
+
+	buckets, _, _, err := inspector.listAllBucketsWithMetadata(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(buckets) != 2 {
+		t.Fatalf("expected both buckets with no region filter, got %d: %+v", len(buckets), buckets)
 	}
 }

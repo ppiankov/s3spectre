@@ -476,6 +476,11 @@ func (i *Inspector) listAllBucketsWithMetadata(ctx context.Context, regions []st
 	bucketRegions := make(map[string]string)
 	metadata := make(map[string]*bucketMetadata)
 
+	allowedRegions := make(map[string]bool, len(regions))
+	for _, r := range regions {
+		allowedRegions[r] = true
+	}
+
 	// ListBuckets returns all buckets regardless of region
 	var result *s3.ListBucketsOutput
 	err := i.client.WithRetry(ctx, func() error {
@@ -487,24 +492,29 @@ func (i *Inspector) listAllBucketsWithMetadata(ctx context.Context, regions []st
 		return nil, nil, nil, fmt.Errorf("failed to list buckets: %w", err)
 	}
 
-	// For each bucket, store metadata and determine region
+	// For each bucket, determine its region and keep only buckets whose region
+	// is in the requested scope (regions passed by the caller, already resolved
+	// from --regions/--all-regions by determineRegions).
 	for _, bucket := range result.Buckets {
-		if bucket.Name != nil {
-			bucketName := *bucket.Name
-			buckets[bucketName] = true
-
-			// Store creation date
-			metadata[bucketName] = &bucketMetadata{
-				CreationDate: bucket.CreationDate,
-			}
-
-			// Get bucket region
-			region, err := i.getBucketRegion(ctx, bucketName)
-			if err != nil {
-				region = i.client.GetRegion() // Fallback to default
-			}
-			bucketRegions[bucketName] = region
+		if bucket.Name == nil {
+			continue
 		}
+		bucketName := *bucket.Name
+
+		region, err := i.getBucketRegion(ctx, bucketName)
+		if err != nil {
+			region = i.client.GetRegion() // Fallback to default
+		}
+
+		if len(allowedRegions) > 0 && !allowedRegions[region] {
+			continue
+		}
+
+		buckets[bucketName] = true
+		metadata[bucketName] = &bucketMetadata{
+			CreationDate: bucket.CreationDate,
+		}
+		bucketRegions[bucketName] = region
 	}
 
 	return buckets, bucketRegions, metadata, nil
