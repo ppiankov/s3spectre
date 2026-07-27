@@ -24,6 +24,9 @@ func scanJSON(filePath string) ([]Reference, error) {
 		// Check for s3:// URLs
 		if matches := s3URLPattern.FindAllStringSubmatch(line, -1); matches != nil {
 			for _, match := range matches {
+				if isPlaceholderBucketName(match[1]) {
+					continue
+				}
 				refs = append(refs, Reference{
 					Bucket:  match[1],
 					Prefix:  match[2],
@@ -37,6 +40,9 @@ func scanJSON(filePath string) ([]Reference, error) {
 		// Check for HTTP(S) S3 URLs
 		if matches := s3HTTPPattern.FindAllStringSubmatch(line, -1); matches != nil {
 			for _, match := range matches {
+				if isPlaceholderBucketName(match[1]) {
+					continue
+				}
 				refs = append(refs, Reference{
 					Bucket:  match[1],
 					Prefix:  match[3],
@@ -47,11 +53,20 @@ func scanJSON(filePath string) ([]Reference, error) {
 			}
 		}
 
-		// Check for bucket name pattern
+		// Check for bucket name pattern. Group 1 is the double-quoted
+		// capture, group 2 the single-quoted one (JSON only ever produces
+		// group 1, but handled the same way as scanCode for consistency).
 		if matches := bucketNamePattern.FindAllStringSubmatch(line, -1); matches != nil {
 			for _, match := range matches {
+				bucket := match[1]
+				if bucket == "" {
+					bucket = match[2]
+				}
+				if isPlaceholderBucketName(bucket) {
+					continue
+				}
 				refs = append(refs, Reference{
-					Bucket:  match[1],
+					Bucket:  bucket,
 					File:    filePath,
 					Line:    lineNum,
 					Context: "json",

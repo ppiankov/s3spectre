@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"os"
 	"regexp"
+	"strings"
 )
 
 var (
@@ -11,14 +12,41 @@ var (
 	s3URLPattern  = regexp.MustCompile(`s3://([a-z0-9][a-z0-9\-\.]{1,61}[a-z0-9])(?:/([^?\s"']+))?(?:\?versionId=([^\s"']+))?`)
 	s3HTTPPattern = regexp.MustCompile(`https?://([a-z0-9][a-z0-9\-\.]{1,61}[a-z0-9])\.s3(?:[.-]([a-z0-9-]+))?\.amazonaws\.com(?:/([^?\s"']+))?(?:\?versionId=([^\s"']+))?`)
 
-	// Bucket name pattern (for env vars and config)
-	bucketNamePattern = regexp.MustCompile(`(?i)(?:bucket|s3[-_]?bucket|s3[-_]?name)[\s:=]+['"]?([a-z0-9][a-z0-9\-\.]{1,61}[a-z0-9])['"]?`)
+	// Bucket name pattern (for env vars and config). Requires the value to be
+	// a quoted string literal (Go's RE2 engine has no backreferences, so
+	// double- and single-quoted forms are two separate alternatives rather
+	// than one pattern with a matching-quote backreference) -- an unquoted
+	// match would be a code expression (variable, attribute access, function
+	// call), not a literal bucket name.
+	bucketNamePattern = regexp.MustCompile(`(?i)(?:bucket|s3[-_]?bucket|s3[-_]?name)[\s:=]+(?:"([a-z0-9][a-z0-9\-\.]{1,61}[a-z0-9])"|'([a-z0-9][a-z0-9\-\.]{1,61}[a-z0-9])')`)
 
 	// Context detection patterns
 	writeOpPattern = regexp.MustCompile(`(?i)(put|write|upload|store|save|create)`)
 	readOpPattern  = regexp.MustCompile(`(?i)(get|read|download|fetch|retrieve|load)`)
 	listOpPattern  = regexp.MustCompile(`(?i)(list|ls|scan|iterate)`)
 )
+
+// placeholderBucketNames lists generic bucket-name tokens commonly used as
+// illustrative examples in documentation, docstrings, and comments (e.g.
+// "s3://bucket/key" as generic usage-example text). Real S3 bucket names are
+// globally unique across all of AWS, so no genuine production bucket is
+// actually named one of these bare placeholder words -- a match is always a
+// false positive, never a real reference worth reporting.
+var placeholderBucketNames = map[string]bool{
+	"bucket":           true,
+	"my-bucket":        true,
+	"your-bucket":      true,
+	"bucket-name":      true,
+	"example-bucket":   true,
+	"your-bucket-name": true,
+	"my-bucket-name":   true,
+}
+
+// isPlaceholderBucketName reports whether name is a common documentation
+// placeholder rather than a real bucket name reference.
+func isPlaceholderBucketName(name string) bool {
+	return placeholderBucketNames[strings.ToLower(name)]
+}
 
 // scanCode scans source code files using regex patterns
 func scanCode(filePath string) ([]Reference, error) {
@@ -39,6 +67,9 @@ func scanCode(filePath string) ([]Reference, error) {
 		// Check for s3:// URLs
 		if matches := s3URLPattern.FindAllStringSubmatch(line, -1); matches != nil {
 			for _, match := range matches {
+				if isPlaceholderBucketName(match[1]) {
+					continue
+				}
 				refs = append(refs, Reference{
 					Bucket:    match[1],
 					Prefix:    match[2],
@@ -53,6 +84,9 @@ func scanCode(filePath string) ([]Reference, error) {
 		// Check for HTTP(S) S3 URLs
 		if matches := s3HTTPPattern.FindAllStringSubmatch(line, -1); matches != nil {
 			for _, match := range matches {
+				if isPlaceholderBucketName(match[1]) {
+					continue
+				}
 				refs = append(refs, Reference{
 					Bucket:    match[1],
 					Prefix:    match[3],
@@ -64,12 +98,21 @@ func scanCode(filePath string) ([]Reference, error) {
 			}
 		}
 
-		// Check for bucket name references
+		// Check for bucket name references. Group 1 is the double-quoted
+		// capture, group 2 the single-quoted one -- exactly one is non-empty
+		// for any match, since the pattern requires one quote style or the
+		// other (never neither, per the WO-49 fix).
 		if matches := bucketNamePattern.FindAllStringSubmatch(line, -1); matches != nil {
 			for _, match := range matches {
+				bucket := match[1]
+				if bucket == "" {
+					bucket = match[2]
+				}
+				if isPlaceholderBucketName(bucket) {
+					continue
+				}
 				// Avoid duplicates from URL patterns
 				isDuplicate := false
-				bucket := match[1]
 				for _, ref := range refs {
 					if ref.Bucket == bucket && ref.Line == lineNum {
 						isDuplicate = true
