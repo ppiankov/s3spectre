@@ -5,6 +5,12 @@ All notable changes to S3Spectre will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.2] - 2026-07-27
+
+### Fixed
+
+- `scan` no longer reports a phantom `MISSING_BUCKET` for an unquoted code expression (a variable, an attribute access) that happens to sit next to the word "bucket" -- the pattern now requires a quoted string literal. A small set of common documentation placeholders (e.g. `bucket`, `example-bucket`) in code and JSON files are also no longer reported as real references.
+
 ## [0.6.1] - 2026-07-27
 
 ### Fixed
@@ -115,7 +121,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Automatic retry with exponential backoff for transient S3 API errors
 - Enhanced error messages with actionable suggestions for common AWS failures (credentials, permissions, rate limiting)
 
-[Unreleased]: https://github.com/ppiankov/s3spectre/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/ppiankov/s3spectre/compare/v0.6.2...HEAD
+[0.6.2]: https://github.com/ppiankov/s3spectre/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/ppiankov/s3spectre/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/ppiankov/s3spectre/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/ppiankov/s3spectre/compare/v0.4.0...v0.5.0
