@@ -198,6 +198,41 @@ func TestScanJSON_HTTPAndS3URL(t *testing.T) {
 	}
 }
 
+// TestScanJSON_BucketNamePattern_QuoteRequiredAndPlaceholderFiltered mirrors
+// the WO-49 scanCode fix for scanJSON's parallel use of bucketNamePattern:
+// only a quoted string value counts as a bucket reference, and a generic
+// placeholder token is never reported as real.
+func TestScanJSON_BucketNamePattern_QuoteRequiredAndPlaceholderFiltered(t *testing.T) {
+	tmpDir := t.TempDir()
+	jsonFile := filepath.Join(tmpDir, "config.json")
+
+	// Note: bucketNamePattern's trigger keyword must be immediately followed
+	// by [\s:=]+ then a quoted value -- a standard JSON quoted key
+	// (`"bucket":`) has its own closing quote in between, so it never
+	// matches this pattern (a pre-existing scanJSON limitation, unrelated to
+	// this fix). Using the unquoted-key form the regex actually supports.
+	content := "bucket: \"acme-real-bucket\"\n// example: bucket: \"my-bucket\"\n"
+	if err := os.WriteFile(jsonFile, []byte(content), 0644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	refs, err := scanJSON(jsonFile)
+	if err != nil {
+		t.Fatalf("scanJSON failed: %v", err)
+	}
+
+	buckets := make(map[string]bool)
+	for _, ref := range refs {
+		buckets[ref.Bucket] = true
+	}
+	if !buckets["acme-real-bucket"] {
+		t.Fatalf("expected a real quoted bucket name to be captured, got refs: %+v", refs)
+	}
+	if buckets["my-bucket"] {
+		t.Fatalf("expected the placeholder 'my-bucket' to be filtered out, got refs: %+v", refs)
+	}
+}
+
 func TestScanEnv_PatternsAndComments(t *testing.T) {
 	tmpDir := t.TempDir()
 	envFile := filepath.Join(tmpDir, "service.env")
@@ -349,5 +384,147 @@ func TestScanFile_RoutesByExtension(t *testing.T) {
 	}
 	if len(refs) != 0 {
 		t.Fatalf("Expected no references for unknown extension, got %d", len(refs))
+	}
+}
+
+// TestScanCode_UnquotedAttributeAccessNotCapturedAsBucket is the core WO-49
+// regression: bucketNamePattern previously matched any token after "bucket ="
+// regardless of quoting, so a variable holding a parsed value (an unquoted
+// attribute-access expression) was captured as if it were a literal bucket
+// name. Confirmed against two independent real codebases before this fix.
+func TestScanCode_UnquotedAttributeAccessNotCapturedAsBucket(t *testing.T) {
+	tmpDir := t.TempDir()
+	codeFile := filepath.Join(tmpDir, "main.py")
+
+	content := "bucket = parsed.netloc\nif not bucket:\n    raise ValueError()\n"
+	if err := os.WriteFile(codeFile, []byte(content), 0644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	refs, err := scanCode(codeFile)
+	if err != nil {
+		t.Fatalf("scanCode failed: %v", err)
+	}
+	for _, ref := range refs {
+		if ref.Bucket == "parsed.netloc" {
+			t.Fatalf("expected unquoted attribute-access expression not to be captured as a bucket name, got refs: %+v", refs)
+		}
+	}
+}
+
+// TestScanCode_UnquotedSelfAttributeNotCapturedAsBucket guards the second
+// real-world shape of the same bug: a keyword-argument-style assignment
+// (`Bucket=self.bucket_name`) where the value is an unquoted self-attribute
+// reference, not a string literal.
+func TestScanCode_UnquotedSelfAttributeNotCapturedAsBucket(t *testing.T) {
+	tmpDir := t.TempDir()
+	codeFile := filepath.Join(tmpDir, "client.py")
+
+	content := "s3.upload_file(Filename=path, Bucket=self.bucket_name, Key=key)\n"
+	if err := os.WriteFile(codeFile, []byte(content), 0644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	refs, err := scanCode(codeFile)
+	if err != nil {
+		t.Fatalf("scanCode failed: %v", err)
+	}
+	for _, ref := range refs {
+		if ref.Bucket == "self.bucket_name" {
+			t.Fatalf("expected unquoted self-attribute reference not to be captured as a bucket name, got refs: %+v", refs)
+		}
+	}
+}
+
+// TestScanCode_QuotedBucketNameStillCaptured is the regression guard: the
+// WO-49 fix must not break the common, legitimate case of a bucket name
+// assigned as an actual string literal, in either quote style.
+func TestScanCode_QuotedBucketNameStillCaptured(t *testing.T) {
+	tmpDir := t.TempDir()
+	codeFile := filepath.Join(tmpDir, "config.py")
+
+	content := "bucket = \"my-real-bucket\"\nother_bucket = 'my-other-bucket'\n"
+	if err := os.WriteFile(codeFile, []byte(content), 0644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	refs, err := scanCode(codeFile)
+	if err != nil {
+		t.Fatalf("scanCode failed: %v", err)
+	}
+
+	buckets := make(map[string]bool)
+	for _, ref := range refs {
+		buckets[ref.Bucket] = true
+	}
+	if !buckets["my-real-bucket"] {
+		t.Fatalf("expected double-quoted literal bucket name to still be captured, got refs: %+v", refs)
+	}
+	if !buckets["my-other-bucket"] {
+		t.Fatalf("expected single-quoted literal bucket name to still be captured, got refs: %+v", refs)
+	}
+}
+
+// TestScanCode_DocstringPlaceholderNotCapturedAsBucket guards the second
+// WO-49 fix: a generic illustrative example like "s3://bucket/key" inside a
+// docstring or comment must not be reported as a real bucket reference,
+// since real S3 bucket names are globally unique and no production bucket
+// is actually named the bare word "bucket".
+func TestScanCode_DocstringPlaceholderNotCapturedAsBucket(t *testing.T) {
+	tmpDir := t.TempDir()
+	codeFile := filepath.Join(tmpDir, "client.py")
+
+	content := "    \"\"\"Download via aioboto3 from s3://bucket/key.\"\"\"\n"
+	if err := os.WriteFile(codeFile, []byte(content), 0644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	refs, err := scanCode(codeFile)
+	if err != nil {
+		t.Fatalf("scanCode failed: %v", err)
+	}
+	if len(refs) != 0 {
+		t.Fatalf("expected a generic 's3://bucket/key' docstring placeholder to produce no references, got %+v", refs)
+	}
+}
+
+// TestScanCode_RealBucketNameSharingPlaceholderWordStillCaptured guards
+// against the placeholder denylist over-firing: a real bucket name must
+// still be captured even if part of it resembles a denylisted word, and a
+// genuinely distinct real bucket name is never suppressed.
+func TestScanCode_RealBucketNameSharingPlaceholderWordStillCaptured(t *testing.T) {
+	tmpDir := t.TempDir()
+	codeFile := filepath.Join(tmpDir, "client.py")
+
+	content := "url = \"s3://acme-prod-data-bucket-42/key\"\n"
+	if err := os.WriteFile(codeFile, []byte(content), 0644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	refs, err := scanCode(codeFile)
+	if err != nil {
+		t.Fatalf("scanCode failed: %v", err)
+	}
+	if len(refs) != 1 || refs[0].Bucket != "acme-prod-data-bucket-42" {
+		t.Fatalf("expected a real, non-placeholder bucket name to still be captured, got %+v", refs)
+	}
+}
+
+func TestIsPlaceholderBucketName(t *testing.T) {
+	cases := []struct {
+		name string
+		want bool
+	}{
+		{"bucket", true},
+		{"BUCKET", true},
+		{"my-bucket", true},
+		{"example-bucket", true},
+		{"acme-prod-data-bucket-42", false},
+		{"", false},
+	}
+	for _, tt := range cases {
+		if got := isPlaceholderBucketName(tt.name); got != tt.want {
+			t.Errorf("isPlaceholderBucketName(%q) = %v, want %v", tt.name, got, tt.want)
+		}
 	}
 }
