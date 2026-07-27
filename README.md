@@ -82,6 +82,7 @@ s3spectre operates in **read-only mode**. It inspects and reports — never modi
 | Document | Contents |
 |----------|----------|
 | [CLI Reference](docs/cli-reference.md) | Full command reference, flags, and configuration |
+| [Guides](docs/guides/README.md) | Task-oriented walkthroughs: reading risk scores, team ownership rollups, cost/cleanup workflow, scan vs. discover |
 
 ## License
 

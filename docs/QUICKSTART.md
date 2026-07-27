@@ -220,7 +220,9 @@ fi
 
 ## Next Steps
 
-- Read the full [README.md](README.md)
+- Read the full [README.md](../README.md)
+- Walk through the task-oriented [Guides](guides/README.md) — reading risk scores,
+  team ownership rollups, the cost/cleanup workflow, and scan vs. discover
 - Integrate with [SpectreHub](https://spectrehub.dev)
 - Check out other Spectre tools:
   - [VaultSpectre](https://github.com/ppiankov/vaultspectre)
