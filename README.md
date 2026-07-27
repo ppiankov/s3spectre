@@ -16,6 +16,7 @@
 
 ## What it is NOT
 
+- Not multi-cloud — AWS S3 only, no GCP Cloud Storage, Azure Blob Storage, or S3-compatible alternatives (MinIO, R2, Spaces); no custom endpoint support
 - Not a replacement for AWS Config Rules or GuardDuty — not real-time
 - Not a data scanner — never reads object contents, only metadata
 - Not a remediation tool — reports only, never modifies buckets
