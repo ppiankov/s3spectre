@@ -601,6 +601,106 @@ func TestScanTerraform_S3URLPlaceholderFiltered(t *testing.T) {
 	}
 }
 
+// TestScanTerraform_UnresolvedInterpolationNotCapturedAsBucket is the core
+// WO-51 regression: tfBucketNameAttr previously captured a Terraform
+// interpolation expression verbatim as if it were a literal bucket name.
+// Reproduced against a real, unrelated 2,938-file Terraform codebase where
+// this accounted for 85% of MISSING_BUCKET findings in a single scan.
+func TestScanTerraform_UnresolvedInterpolationNotCapturedAsBucket(t *testing.T) {
+	tmpDir := t.TempDir()
+	tfFile := filepath.Join(tmpDir, "s3.tf")
+
+	content := `
+resource "aws_s3_bucket" "landing" {
+  bucket = "${local.cluster_name}-landing"
+}
+`
+	if err := os.WriteFile(tfFile, []byte(content), 0644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	refs, err := scanTerraform(tfFile)
+	if err != nil {
+		t.Fatalf("scanTerraform failed: %v", err)
+	}
+	if len(refs) != 0 {
+		t.Fatalf("expected an unresolved interpolation expression not to be captured as a bucket name, got refs: %+v", refs)
+	}
+}
+
+// TestScanTerraform_PlainLiteralStillCaptured is the regression guard: the
+// WO-51 fix must not affect the common, legitimate case of a bucket name
+// assigned as an actual literal string.
+func TestScanTerraform_PlainLiteralStillCaptured(t *testing.T) {
+	tmpDir := t.TempDir()
+	tfFile := filepath.Join(tmpDir, "s3.tf")
+
+	content := `
+resource "aws_s3_bucket" "backups" {
+  bucket = "my-real-bucket"
+}
+`
+	if err := os.WriteFile(tfFile, []byte(content), 0644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	refs, err := scanTerraform(tfFile)
+	if err != nil {
+		t.Fatalf("scanTerraform failed: %v", err)
+	}
+	if len(refs) != 1 || refs[0].Bucket != "my-real-bucket" {
+		t.Fatalf("expected the plain literal bucket name to still be captured, got refs: %+v", refs)
+	}
+}
+
+// TestScanTerraform_MixedInterpolatedAndLiteralBuckets covers a file with
+// one interpolated resource (suppressed) and one plain-literal resource
+// (still captured) -- the shape actually seen in the real codebase this WO
+// was reproduced against.
+func TestScanTerraform_MixedInterpolatedAndLiteralBuckets(t *testing.T) {
+	tmpDir := t.TempDir()
+	tfFile := filepath.Join(tmpDir, "s3.tf")
+
+	content := `
+resource "aws_s3_bucket" "loki" {
+  bucket = "${local.cluster_name}-loki"
+}
+
+resource "aws_s3_bucket" "vault" {
+  bucket = "acme-vault-prod"
+}
+`
+	if err := os.WriteFile(tfFile, []byte(content), 0644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	refs, err := scanTerraform(tfFile)
+	if err != nil {
+		t.Fatalf("scanTerraform failed: %v", err)
+	}
+	if len(refs) != 1 || refs[0].Bucket != "acme-vault-prod" {
+		t.Fatalf("expected only the plain literal bucket to be captured, got refs: %+v", refs)
+	}
+}
+
+func TestHasUnresolvedInterpolation(t *testing.T) {
+	cases := []struct {
+		name  string
+		value string
+		want  bool
+	}{
+		{"single local reference", "${local.cluster_name}-landing", true},
+		{"multiple interpolations", "${local.common_tags.Project}-${local.common_tags.Environment}-web-public", true},
+		{"plain literal", "my-real-bucket", false},
+		{"empty", "", false},
+	}
+	for _, tt := range cases {
+		if got := hasUnresolvedInterpolation(tt.value); got != tt.want {
+			t.Errorf("hasUnresolvedInterpolation(%q) = %v, want %v", tt.value, got, tt.want)
+		}
+	}
+}
+
 func TestIsPlaceholderBucketName(t *testing.T) {
 	cases := []struct {
 		name string
