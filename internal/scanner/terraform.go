@@ -76,6 +76,9 @@ func scanTerraform(filePath string) ([]Reference, error) {
 		// Also check for s3:// URLs in any line
 		if matches := s3URLPattern.FindAllStringSubmatch(line, -1); matches != nil {
 			for _, match := range matches {
+				if isPlaceholderBucketName(match[1]) {
+					continue
+				}
 				refs = append(refs, Reference{
 					Bucket:  match[1],
 					Prefix:  match[2],

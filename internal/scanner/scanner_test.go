@@ -510,6 +510,97 @@ func TestScanCode_RealBucketNameSharingPlaceholderWordStillCaptured(t *testing.T
 	}
 }
 
+// TestScanEnv_S3URLPlaceholderFiltered is the WO-50 extension of the WO-49
+// placeholder-suppression fix to scanEnv's own s3URLPattern usage: a generic
+// example URL must not produce a phantom reference, while a real bucket name
+// elsewhere in the same file is still captured. The placeholder line is
+// deliberately NOT a comment (scanEnv already skips full-line comments before
+// reaching s3URLPattern) so this test actually exercises the new filter
+// rather than passing vacuously via the pre-existing comment-skip.
+func TestScanEnv_S3URLPlaceholderFiltered(t *testing.T) {
+	tmpDir := t.TempDir()
+	envFile := filepath.Join(tmpDir, "service.env")
+
+	content := "EXAMPLE_S3_PATH=s3://bucket/key\nS3_URL=s3://acme-real-bucket/data\n"
+	if err := os.WriteFile(envFile, []byte(content), 0644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	refs, err := scanEnv(envFile)
+	if err != nil {
+		t.Fatalf("scanEnv failed: %v", err)
+	}
+
+	buckets := make(map[string]bool)
+	for _, ref := range refs {
+		buckets[ref.Bucket] = true
+	}
+	if buckets["bucket"] {
+		t.Fatalf("expected the placeholder 'bucket' to be filtered out, got refs: %+v", refs)
+	}
+	if !buckets["acme-real-bucket"] {
+		t.Fatalf("expected a real bucket name to still be captured, got refs: %+v", refs)
+	}
+}
+
+// TestScanYAML_S3URLPlaceholderFiltered mirrors the same fix for scanYAML's
+// s3URLPattern usage (yamlBucketPattern's own quote-optionality is untouched
+// by WO-50, only the shared URL pattern is filtered).
+func TestScanYAML_S3URLPlaceholderFiltered(t *testing.T) {
+	tmpDir := t.TempDir()
+	yamlFile := filepath.Join(tmpDir, "template.yaml")
+
+	content := "# example url: s3://bucket/key\nstorage:\n  url: s3://acme-real-bucket/prefix\n"
+	if err := os.WriteFile(yamlFile, []byte(content), 0644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	refs, err := scanYAML(yamlFile)
+	if err != nil {
+		t.Fatalf("scanYAML failed: %v", err)
+	}
+
+	buckets := make(map[string]bool)
+	for _, ref := range refs {
+		buckets[ref.Bucket] = true
+	}
+	if buckets["bucket"] {
+		t.Fatalf("expected the placeholder 'bucket' to be filtered out, got refs: %+v", refs)
+	}
+	if !buckets["acme-real-bucket"] {
+		t.Fatalf("expected a real bucket name to still be captured, got refs: %+v", refs)
+	}
+}
+
+// TestScanTerraform_S3URLPlaceholderFiltered mirrors the same fix for
+// scanTerraform's s3URLPattern usage (tfBucketNameAttr, the resource-block
+// bucket attribute extractor, is untouched by WO-50).
+func TestScanTerraform_S3URLPlaceholderFiltered(t *testing.T) {
+	tmpDir := t.TempDir()
+	tfFile := filepath.Join(tmpDir, "main.tf")
+
+	content := "# example: s3://bucket/key\nlocals {\n  backup_url = \"s3://acme-real-bucket/backup\"\n}\n"
+	if err := os.WriteFile(tfFile, []byte(content), 0644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	refs, err := scanTerraform(tfFile)
+	if err != nil {
+		t.Fatalf("scanTerraform failed: %v", err)
+	}
+
+	buckets := make(map[string]bool)
+	for _, ref := range refs {
+		buckets[ref.Bucket] = true
+	}
+	if buckets["bucket"] {
+		t.Fatalf("expected the placeholder 'bucket' to be filtered out, got refs: %+v", refs)
+	}
+	if !buckets["acme-real-bucket"] {
+		t.Fatalf("expected a real bucket name to still be captured, got refs: %+v", refs)
+	}
+}
+
 func TestIsPlaceholderBucketName(t *testing.T) {
 	cases := []struct {
 		name string
