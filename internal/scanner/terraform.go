@@ -14,6 +14,14 @@ var (
 	tfS3ObjectResource = regexp.MustCompile(`resource\s+"aws_s3_(?:bucket_)?object"\s+"[^"]+"\s+\{`)
 )
 
+// hasUnresolvedInterpolation reports whether a captured Terraform string
+// attribute still contains "${...}" interpolation syntax. The scanner has no
+// HCL evaluator, so such a value can never be resolved to the real bucket
+// name it represents at apply time.
+func hasUnresolvedInterpolation(value string) bool {
+	return strings.Contains(value, "${")
+}
+
 // scanTerraform scans Terraform files for S3 bucket references
 func scanTerraform(filePath string) ([]Reference, error) {
 	file, err := os.Open(filePath)
@@ -66,10 +74,17 @@ func scanTerraform(filePath string) ([]Reference, error) {
 			continue
 		}
 
-		// Extract bucket name
+		// Extract bucket name. An unresolved Terraform interpolation
+		// (e.g. "${local.cluster_name}-landing") is never a real bucket
+		// name -- the scanner has no HCL evaluator to resolve locals/vars,
+		// and reporting the raw expression as if it were literal would
+		// always produce a phantom MISSING_BUCKET finding. Skip it rather
+		// than guess.
 		if inS3Resource {
 			if match := tfBucketNameAttr.FindStringSubmatch(trimmed); match != nil {
-				currentBucket = match[1]
+				if !hasUnresolvedInterpolation(match[1]) {
+					currentBucket = match[1]
+				}
 			}
 		}
 
