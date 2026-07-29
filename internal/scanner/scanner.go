@@ -7,6 +7,25 @@ import (
 	"strings"
 )
 
+// excludedDirNames lists directory basenames that hold third-party
+// dependency code or build output, never the operator's own application
+// code. These are skipped by exact basename match (not substring/prefix) so
+// a legitimately-named directory that merely contains one of these words
+// (e.g. "vendor-scripts") is not accidentally excluded. ".terraform" is
+// already covered by the hidden-directory skip below but is listed here too
+// for documentation clarity.
+var excludedDirNames = map[string]bool{
+	"vendor":           true,
+	"node_modules":     true,
+	"target":           true,
+	"dist":             true,
+	"build":            true,
+	"Pods":             true,
+	"site-packages":    true,
+	"bower_components": true,
+	".terraform":       true,
+}
+
 // RepoScanner scans a repository for S3 references
 type RepoScanner struct {
 	repoPath string
@@ -33,6 +52,9 @@ func (s *RepoScanner) Scan(ctx context.Context) ([]Reference, error) {
 		// Skip directories and hidden files
 		if info.IsDir() {
 			if strings.HasPrefix(info.Name(), ".") && info.Name() != "." {
+				return filepath.SkipDir
+			}
+			if excludedDirNames[info.Name()] {
 				return filepath.SkipDir
 			}
 			return nil
