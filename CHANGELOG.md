@@ -5,6 +5,12 @@ All notable changes to S3Spectre will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.4] - 2026-07-29
+
+### Fixed
+
+- `scan` no longer reports a phantom `MISSING_BUCKET` for a Terraform `bucket = "..."` attribute whose value still contains unresolved `${...}` interpolation syntax (e.g. `bucket = "${local.cluster_name}-landing"`) -- such values are now skipped rather than checked against AWS as if they were literal bucket names.
+
 ## [0.6.3] - 2026-07-28
 
 ### Fixed
@@ -127,7 +133,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Automatic retry with exponential backoff for transient S3 API errors
 - Enhanced error messages with actionable suggestions for common AWS failures (credentials, permissions, rate limiting)
 
-[Unreleased]: https://github.com/ppiankov/s3spectre/compare/v0.6.3...HEAD
+[Unreleased]: https://github.com/ppiankov/s3spectre/compare/v0.6.4...HEAD
+[0.6.4]: https://github.com/ppiankov/s3spectre/compare/v0.6.3...v0.6.4
 [0.6.3]: https://github.com/ppiankov/s3spectre/compare/v0.6.2...v0.6.3
 [0.6.2]: https://github.com/ppiankov/s3spectre/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/ppiankov/s3spectre/compare/v0.6.0...v0.6.1
