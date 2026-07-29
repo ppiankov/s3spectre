@@ -64,6 +64,106 @@ resource "aws_s3_bucket" "data" {
 	}
 }
 
+// TestRepoScanner_ExcludesVendorDirectory is the core WO-52 regression:
+// third-party dependency code under vendor/ must never be scanned, even
+// though it has a normal, non-hidden directory name and recognized file
+// extensions. Reproduced against a real vendored Go backend service where
+// 100% of findings came from vendor/github.com/aws/aws-sdk-go source.
+func TestRepoScanner_ExcludesVendorDirectory(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	vendorDir := filepath.Join(tmpDir, "vendor", "pkg")
+	if err := os.MkdirAll(vendorDir, 0755); err != nil {
+		t.Fatalf("Failed to create vendor dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(vendorDir, "file.go"), []byte(`bucket = "vendored-bucket"`), 0644); err != nil {
+		t.Fatalf("Failed to create vendored test file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "main.go"), []byte(`bucket = "app-bucket"`), 0644); err != nil {
+		t.Fatalf("Failed to create app test file: %v", err)
+	}
+
+	scanner := NewRepoScanner(tmpDir)
+	refs, err := scanner.Scan(context.Background())
+	if err != nil {
+		t.Fatalf("Scan failed: %v", err)
+	}
+
+	buckets := make(map[string]bool)
+	for _, ref := range refs {
+		buckets[ref.Bucket] = true
+	}
+	if buckets["vendored-bucket"] {
+		t.Fatalf("expected a bucket reference inside vendor/ to be excluded, got refs: %+v", refs)
+	}
+	if !buckets["app-bucket"] {
+		t.Fatalf("expected the app's own bucket reference to still be captured, got refs: %+v", refs)
+	}
+}
+
+// TestRepoScanner_ExcludesOtherDependencyDirectories covers the rest of the
+// WO-52 denylist as a table, one directory at a time.
+func TestRepoScanner_ExcludesOtherDependencyDirectories(t *testing.T) {
+	dirNames := []string{"node_modules", "target", "dist", "build", "Pods", "site-packages", "bower_components"}
+
+	for _, dirName := range dirNames {
+		t.Run(dirName, func(t *testing.T) {
+			tmpDir := t.TempDir()
+
+			excludedDir := filepath.Join(tmpDir, dirName)
+			if err := os.MkdirAll(excludedDir, 0755); err != nil {
+				t.Fatalf("Failed to create %s dir: %v", dirName, err)
+			}
+			if err := os.WriteFile(filepath.Join(excludedDir, "file.py"), []byte(`bucket = "excluded-bucket"`), 0644); err != nil {
+				t.Fatalf("Failed to create test file: %v", err)
+			}
+
+			scanner := NewRepoScanner(tmpDir)
+			refs, err := scanner.Scan(context.Background())
+			if err != nil {
+				t.Fatalf("Scan failed: %v", err)
+			}
+			for _, ref := range refs {
+				if ref.Bucket == "excluded-bucket" {
+					t.Fatalf("expected a bucket reference inside %s/ to be excluded, got refs: %+v", dirName, refs)
+				}
+			}
+		})
+	}
+}
+
+// TestRepoScanner_DoesNotExcludeSimilarlyNamedDirectory guards the
+// exact-basename-match requirement: a directory whose name merely contains
+// "vendor" as a substring, rather than being named exactly "vendor", must
+// still be scanned.
+func TestRepoScanner_DoesNotExcludeSimilarlyNamedDirectory(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	dir := filepath.Join(tmpDir, "vendor-scripts")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatalf("Failed to create dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "file.py"), []byte(`bucket = "vendor-scripts-bucket"`), 0644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	scanner := NewRepoScanner(tmpDir)
+	refs, err := scanner.Scan(context.Background())
+	if err != nil {
+		t.Fatalf("Scan failed: %v", err)
+	}
+
+	found := false
+	for _, ref := range refs {
+		if ref.Bucket == "vendor-scripts-bucket" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected a directory named 'vendor-scripts' (substring match only) not to be excluded, got refs: %+v", refs)
+	}
+}
+
 func TestScanYAML(t *testing.T) {
 	tmpDir := t.TempDir()
 	yamlFile := filepath.Join(tmpDir, "test.yaml")
