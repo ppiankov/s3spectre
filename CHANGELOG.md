@@ -5,6 +5,12 @@ All notable changes to S3Spectre will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.5] - 2026-07-29
+
+### Fixed
+
+- `scan` no longer walks `vendor/`, `node_modules/`, `target/`, `dist/`, `build/`, `Pods/`, `site-packages/`, or `bower_components/` directories -- third-party dependency and build-output code was previously scanned as if it were the operator's own, and could produce phantom findings sourced entirely from library internals.
+
 ## [0.6.4] - 2026-07-29
 
 ### Fixed
@@ -133,7 +139,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Automatic retry with exponential backoff for transient S3 API errors
 - Enhanced error messages with actionable suggestions for common AWS failures (credentials, permissions, rate limiting)
 
-[Unreleased]: https://github.com/ppiankov/s3spectre/compare/v0.6.4...HEAD
+[Unreleased]: https://github.com/ppiankov/s3spectre/compare/v0.6.5...HEAD
+[0.6.5]: https://github.com/ppiankov/s3spectre/compare/v0.6.4...v0.6.5
 [0.6.4]: https://github.com/ppiankov/s3spectre/compare/v0.6.3...v0.6.4
 [0.6.3]: https://github.com/ppiankov/s3spectre/compare/v0.6.2...v0.6.3
 [0.6.2]: https://github.com/ppiankov/s3spectre/compare/v0.6.1...v0.6.2
