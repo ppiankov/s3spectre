@@ -3,6 +3,7 @@ package report
 import (
 	"bytes"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -204,6 +205,133 @@ func TestSARIFReporter_GenerateDiscovery(t *testing.T) {
 	}
 	if encryptionResult.Level != "warning" {
 		t.Fatalf("expected no encryption level warning, got %q", encryptionResult.Level)
+	}
+}
+
+// TestSARIFReporter_ScanOutputSatisfiesGitHubIngestionRequirements is the
+// WO-56 verification: confirms scan mode's SARIF output has every field
+// GitHub's code-scanning ingestion needs to produce an inline PR-line
+// annotation -- a real, resolvable artifactLocation.uri (not empty, not an
+// s3:// URI) plus a region.startLine, for a finding the scanner tied to an
+// actual code reference. This is what docs/guides/ci-sarif-annotations.md
+// documents as scan mode's differentiator over discover mode.
+func TestSARIFReporter_ScanOutputSatisfiesGitHubIngestionRequirements(t *testing.T) {
+	var buf bytes.Buffer
+	reporter := NewSARIFReporter(&buf)
+
+	data := Data{
+		Tool:    "s3spectre",
+		Version: "0.6.5",
+		Buckets: map[string]*analyzer.BucketAnalysis{
+			"acme-missing-bucket": {
+				Name:   "acme-missing-bucket",
+				Status: analyzer.StatusMissingBucket,
+				Prefixes: []analyzer.PrefixAnalysis{
+					{
+						Prefix: "assets",
+						Status: analyzer.StatusStalePrefix,
+					},
+				},
+			},
+		},
+		References: []scanner.Reference{
+			{Bucket: "acme-missing-bucket", File: "internal/storage/client.go", Line: 42},
+			{Bucket: "acme-missing-bucket", Prefix: "assets", File: "internal/storage/client.go", Line: 57},
+		},
+	}
+
+	if err := reporter.Generate(data); err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+
+	var decoded sarifOutput
+	if err := json.Unmarshal(buf.Bytes(), &decoded); err != nil {
+		t.Fatalf("failed to unmarshal output: %v", err)
+	}
+
+	if decoded.Schema == "" {
+		t.Fatal("expected non-empty $schema")
+	}
+	if decoded.Version == "" {
+		t.Fatal("expected non-empty version")
+	}
+	if len(decoded.Runs) == 0 || decoded.Runs[0].Tool.Driver.Name == "" {
+		t.Fatal("expected a non-empty tool.driver.name")
+	}
+	if len(decoded.Runs[0].Results) == 0 {
+		t.Fatal("expected at least one result")
+	}
+
+	for _, result := range decoded.Runs[0].Results {
+		if result.RuleID == "" {
+			t.Fatalf("result missing ruleId: %+v", result)
+		}
+		if result.Message.Text == "" {
+			t.Fatalf("result %s missing message.text", result.RuleID)
+		}
+		if len(result.Locations) == 0 || result.Locations[0].PhysicalLocation == nil {
+			t.Fatalf("result %s missing a physicalLocation", result.RuleID)
+		}
+		uri := result.Locations[0].PhysicalLocation.ArtifactLocation.URI
+		if uri == "" {
+			t.Fatalf("result %s has an empty artifactLocation.uri", result.RuleID)
+		}
+		if strings.HasPrefix(uri, "s3://") {
+			t.Fatalf("result %s has an s3:// uri %q -- GitHub cannot resolve this to a file for an inline annotation", result.RuleID, uri)
+		}
+		region := result.Locations[0].PhysicalLocation.Region
+		if region == nil || region.StartLine == 0 {
+			t.Fatalf("result %s missing a region.startLine", result.RuleID)
+		}
+	}
+}
+
+// TestSARIFReporter_DiscoveryLocationUsesS3URINotFilePath locks in the
+// documented limitation: discover mode has no source-code location, so its
+// SARIF results use an s3:// URI rather than a file path. This is expected
+// -- discover findings are valid SARIF and appear in the Security tab, but
+// GitHub cannot turn an s3:// URI into an inline PR-line annotation. If this
+// test starts failing, docs/guides/ci-sarif-annotations.md's table needs to
+// be updated to match the new behavior.
+func TestSARIFReporter_DiscoveryLocationUsesS3URINotFilePath(t *testing.T) {
+	var buf bytes.Buffer
+	reporter := NewSARIFReporter(&buf)
+
+	data := DiscoveryData{
+		Tool:    "s3spectre",
+		Version: "0.6.5",
+		Config:  DiscoveryConfig{CheckPublicAccess: true},
+		Buckets: map[string]*analyzer.BucketDiscovery{
+			"acme-public-bucket": {
+				Name:   "acme-public-bucket",
+				Status: analyzer.StatusRisky,
+				BucketInfo: &s3.BucketInfo{
+					Name:         "acme-public-bucket",
+					PublicAccess: &s3.PublicAccessInfo{IsPublic: true},
+				},
+			},
+		},
+	}
+
+	if err := reporter.GenerateDiscovery(data); err != nil {
+		t.Fatalf("GenerateDiscovery failed: %v", err)
+	}
+
+	var decoded sarifOutput
+	if err := json.Unmarshal(buf.Bytes(), &decoded); err != nil {
+		t.Fatalf("failed to unmarshal output: %v", err)
+	}
+
+	result, ok := findResult(decoded.Runs[0].Results, sarifRulePublicBucket)
+	if !ok {
+		t.Fatalf("missing result for %s", sarifRulePublicBucket)
+	}
+	if len(result.Locations) == 0 || result.Locations[0].PhysicalLocation == nil {
+		t.Fatal("expected a physicalLocation")
+	}
+	uri := result.Locations[0].PhysicalLocation.ArtifactLocation.URI
+	if !strings.HasPrefix(uri, "s3://") {
+		t.Fatalf("expected discover mode's location uri to use the s3:// scheme (no source-code location exists), got %q", uri)
 	}
 }
 

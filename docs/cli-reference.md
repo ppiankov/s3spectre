@@ -101,7 +101,7 @@ s3spectre scan --repo . --include-references --format json
 | `--fail-on-stale` | `false` | Exit non-zero on stale prefixes |
 | `--fail-on-version-sprawl` | `false` | Exit non-zero on version sprawl |
 | `--fail-on-unused` | `false` | Exit non-zero on unused buckets |
-| `--include-references` | `false` | Include reference details in output |
+| `--include-references` | `false` | Include reference details in `text`/`json`/`markdown`/`spectrehub` output. `--format sarif` always includes them regardless of this flag -- SARIF's file/line locations (needed for inline PR annotations) depend on the same data |
 | `--no-progress` | `false` | Disable TTY progress indicators |
 
 ### Discover mode

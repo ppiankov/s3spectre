@@ -32,6 +32,37 @@ func TestScanFlagDefaults(t *testing.T) {
 	}
 }
 
+// TestShouldIncludeReferences is the WO-56 regression: SARIF's inline
+// PR-annotation capability depends on scan's collected references reaching
+// the report, but that was previously gated entirely behind
+// --include-references -- a flag whose only other purpose is JSON output
+// verbosity. Running `s3spectre scan --format sarif` without that flag (the
+// natural, undocumented-otherwise invocation) silently produced SARIF output
+// with no file/line locations, so no finding could ever get an inline
+// annotation.
+func TestShouldIncludeReferences(t *testing.T) {
+	cases := []struct {
+		name                  string
+		format                string
+		includeReferencesFlag bool
+		want                  bool
+	}{
+		{"sarif format always includes references", "sarif", false, true},
+		{"sarif format with flag also set", "sarif", true, true},
+		{"json format respects the flag when unset", "json", false, false},
+		{"json format respects the flag when set", "json", true, true},
+		{"text format respects the flag when unset", "text", false, false},
+		{"text format respects the flag when set", "text", true, true},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := shouldIncludeReferences(tt.format, tt.includeReferencesFlag); got != tt.want {
+				t.Errorf("shouldIncludeReferences(%q, %v) = %v, want %v", tt.format, tt.includeReferencesFlag, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestScanSelectReporter(t *testing.T) {
 	var buf bytes.Buffer
 
