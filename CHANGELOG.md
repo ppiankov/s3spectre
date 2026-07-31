@@ -5,6 +5,16 @@ All notable changes to S3Spectre will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.6] - 2026-07-31
+
+### Added
+
+- `docs/examples/github-action-scan.yml` and a new guide document how to wire `scan --format sarif` into GitHub's native code-scanning ingestion so findings with a real code reference appear as inline PR-line annotations.
+
+### Fixed
+
+- `scan --format sarif` now always includes file/line reference data regardless of `--include-references` -- that flag previously gated SARIF's location data too, so the documented `s3spectre scan --format sarif` invocation silently produced SARIF output with no inline-annotation-capable locations at all.
+
 ## [0.6.5] - 2026-07-29
 
 ### Fixed
@@ -139,7 +149,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Automatic retry with exponential backoff for transient S3 API errors
 - Enhanced error messages with actionable suggestions for common AWS failures (credentials, permissions, rate limiting)
 
-[Unreleased]: https://github.com/ppiankov/s3spectre/compare/v0.6.5...HEAD
+[Unreleased]: https://github.com/ppiankov/s3spectre/compare/v0.6.6...HEAD
+[0.6.6]: https://github.com/ppiankov/s3spectre/compare/v0.6.5...v0.6.6
 [0.6.5]: https://github.com/ppiankov/s3spectre/compare/v0.6.4...v0.6.5
 [0.6.4]: https://github.com/ppiankov/s3spectre/compare/v0.6.3...v0.6.4
 [0.6.3]: https://github.com/ppiankov/s3spectre/compare/v0.6.2...v0.6.3
