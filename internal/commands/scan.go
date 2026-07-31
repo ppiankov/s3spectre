@@ -65,7 +65,7 @@ func init() {
 	scanCmd.Flags().BoolVar(&scanFlags.failOnStale, "fail-on-stale", false, "Exit with error if stale prefixes found")
 	scanCmd.Flags().BoolVar(&scanFlags.failOnVersionSprawl, "fail-on-version-sprawl", false, "Exit with error if version sprawl detected")
 	scanCmd.Flags().BoolVar(&scanFlags.failOnUnused, "fail-on-unused", false, "Exit with error if unused buckets found")
-	scanCmd.Flags().BoolVar(&scanFlags.includeReferences, "include-references", false, "Include detailed reference list in output")
+	scanCmd.Flags().BoolVar(&scanFlags.includeReferences, "include-references", false, "Include detailed reference list in output (always included for --format sarif regardless of this flag)")
 	scanCmd.Flags().BoolVar(&scanFlags.noProgress, "no-progress", false, "Disable progress indicators")
 	scanCmd.Flags().DurationVar(&scanFlags.timeout, "timeout", 0, "Total operation timeout (e.g. 5m, 30s). 0 means no timeout")
 	scanCmd.Flags().StringVar(&scanFlags.baselinePath, "baseline", "", "Path to previous JSON report for diff comparison")
@@ -160,7 +160,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 		Buckets: analysis.Buckets,
 	}
 
-	if scanFlags.includeReferences {
+	if shouldIncludeReferences(scanFlags.outputFormat, scanFlags.includeReferences) {
 		reportData.References = references
 	}
 

@@ -1,0 +1,56 @@
+# Example: run `s3spectre scan` on every PR and surface findings as inline
+# code-scanning annotations via GitHub's native SARIF ingestion.
+#
+# This wires an existing s3spectre output format (--format sarif) into an
+# existing GitHub-native ingestion path (github/codeql-action/upload-sarif) --
+# no new AWS permissions or s3spectre features required.
+#
+# Only scan mode's findings can produce inline PR-line annotations, and only
+# for buckets/prefixes the scanner actually found referenced in your code
+# (a real file + line to attach the annotation to). Findings with no code
+# reference, and everything discover mode reports, still land in the SARIF
+# file and appear in the repo's Security > Code scanning alerts list, but
+# without an inline annotation. See docs/guides/ci-sarif-annotations.md.
+#
+# Copy this file to .github/workflows/s3spectre-scan.yml and adjust the
+# install step and AWS credential step for your environment.
+
+name: s3spectre scan
+
+on:
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+  security-events: write # required by github/codeql-action/upload-sarif
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Install s3spectre
+        run: |
+          brew tap ppiankov/tap
+          brew install s3spectre
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Run s3spectre scan
+        # No --fail-on-* flags here: the step always exits 0 so the upload
+        # step below always runs. If you add --fail-on-missing (or similar)
+        # to gate the PR on drift, add `if: always()` to the upload step so
+        # it still runs after a nonzero exit.
+        run: s3spectre scan --format sarif --output results.sarif
+
+      - name: Upload SARIF results
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: results.sarif

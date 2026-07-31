@@ -149,6 +149,15 @@ func configureInspectorRegions(inspector *s3.Inspector, s3Client *s3.Client, reg
 	}
 }
 
+// shouldIncludeReferences decides whether scan's collected file/line
+// references should be attached to the report. --include-references gates
+// this for JSON output verbosity, but SARIF needs it unconditionally: a
+// finding with no reference can only fall back to an s3:// location URI,
+// which GitHub cannot resolve into an inline PR annotation.
+func shouldIncludeReferences(format string, includeReferencesFlag bool) bool {
+	return includeReferencesFlag || format == "sarif"
+}
+
 func selectReporter(format string, writer io.Writer) (report.Reporter, error) {
 	switch format {
 	case "json":

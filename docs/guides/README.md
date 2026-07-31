@@ -13,3 +13,6 @@ want to understand it or act on it.
   `--estimate-cost` and `--suggest-lifecycle-policy` end to end
 - [Scan and discover answer different questions](scan-plus-discover.md) — when to
   use which mode, and a worked example of what happens when you use both
+- [Surfacing scan findings as inline PR annotations](ci-sarif-annotations.md) —
+  wiring `--format sarif` into GitHub's code-scanning ingestion, and why only
+  `scan` (not `discover`) findings can get an inline annotation
