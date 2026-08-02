@@ -5,6 +5,13 @@ All notable changes to S3Spectre will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.7] - 2026-08-02
+
+### Fixed
+
+- `scan` no longer reports a phantom `MISSING_BUCKET` for an identifier that merely ends in "Bucket" with no separator (e.g. `opCreateBucket`, `ErrCodeNoSuchBucket` -- AWS SDK operation/error-code constants) -- the bucket-name keyword must now start a standalone identifier component, while snake_case/kebab-case forms like `other_bucket` still match.
+- `scan` no longer reports a phantom `MISSING_BUCKET` for `doc.s3.amazonaws.com` (AWS's own hardcoded S3 API XML namespace URI) or for a generic `default-bucket` placeholder value seen in SDK-wrapper defaults.
+
 ## [0.6.6] - 2026-07-31
 
 ### Added
@@ -149,7 +156,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Automatic retry with exponential backoff for transient S3 API errors
 - Enhanced error messages with actionable suggestions for common AWS failures (credentials, permissions, rate limiting)
 
-[Unreleased]: https://github.com/ppiankov/s3spectre/compare/v0.6.6...HEAD
+[Unreleased]: https://github.com/ppiankov/s3spectre/compare/v0.6.7...HEAD
+[0.6.7]: https://github.com/ppiankov/s3spectre/compare/v0.6.6...v0.6.7
 [0.6.6]: https://github.com/ppiankov/s3spectre/compare/v0.6.5...v0.6.6
 [0.6.5]: https://github.com/ppiankov/s3spectre/compare/v0.6.4...v0.6.5
 [0.6.4]: https://github.com/ppiankov/s3spectre/compare/v0.6.3...v0.6.4
