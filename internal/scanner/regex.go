@@ -50,6 +50,16 @@ var placeholderBucketNames = map[string]bool{
 	"example-bucket":   true,
 	"your-bucket-name": true,
 	"my-bucket-name":   true,
+	// "doc" is not a documentation-example placeholder like the entries
+	// above -- it's AWS's own hardcoded S3 API XML namespace URI,
+	// doc.s3.amazonaws.com/2006-03-01/, which appears verbatim throughout
+	// the AWS SDK's own source and doc comments and happens to share
+	// s3HTTPPattern's virtual-hosted-style URL shape.
+	"doc": true,
+	// "default-bucket" is a generic hardcoded default/zero-value seen in a
+	// real SDK-wrapper library's options struct, not an illustrative
+	// documentation example.
+	"default-bucket": true,
 }
 
 // isPlaceholderBucketName reports whether name is a common documentation
