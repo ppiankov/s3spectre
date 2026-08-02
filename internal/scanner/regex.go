@@ -18,7 +18,17 @@ var (
 	// than one pattern with a matching-quote backreference) -- an unquoted
 	// match would be a code expression (variable, attribute access, function
 	// call), not a literal bucket name.
-	bucketNamePattern = regexp.MustCompile(`(?i)(?:bucket|s3[-_]?bucket|s3[-_]?name)[\s:=]+(?:"([a-z0-9][a-z0-9\-\.]{1,61}[a-z0-9])"|'([a-z0-9][a-z0-9\-\.]{1,61}[a-z0-9])')`)
+	//
+	// The leading (?:^|[^a-z]) requires the keyword not be immediately
+	// preceded by a letter, so it rejects a keyword embedded as a bare
+	// camelCase suffix (e.g. "opCreateBucket", "ErrCodeNoSuchBucket" -- AWS
+	// SDK operation/error-code constants, not bucket references) while still
+	// matching a snake_case/kebab-case identifier like "other_bucket" or
+	// "my-bucket-name" (preceded by "_"/"-", which are non-letters). Go's
+	// RE2 has no lookbehind, so the preceding character is consumed as part
+	// of the match rather than asserted -- this doesn't affect the numbered
+	// capture groups below, since it's a non-capturing group.
+	bucketNamePattern = regexp.MustCompile(`(?i)(?:^|[^a-z])(?:bucket|s3[-_]?bucket|s3[-_]?name)[\s:=]+(?:"([a-z0-9][a-z0-9\-\.]{1,61}[a-z0-9])"|'([a-z0-9][a-z0-9\-\.]{1,61}[a-z0-9])')`)
 
 	// Context detection patterns
 	writeOpPattern = regexp.MustCompile(`(?i)(put|write|upload|store|save|create)`)

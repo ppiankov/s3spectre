@@ -801,6 +801,66 @@ func TestHasUnresolvedInterpolation(t *testing.T) {
 	}
 }
 
+// TestScanCode_SDKConstantSuffixNotCapturedAsBucket is the core WO-53
+// regression: bucketNamePattern previously had no boundary before the
+// keyword alternation, so it matched "Bucket" embedded as a bare camelCase
+// suffix inside an unrelated identifier. Reproduced against a real vendored
+// AWS SDK source file where API operation-name and error-code constants
+// (opCreateBucket, ErrCodeNoSuchBucket) were captured as if they were
+// literal bucket names.
+func TestScanCode_SDKConstantSuffixNotCapturedAsBucket(t *testing.T) {
+	tmpDir := t.TempDir()
+	codeFile := filepath.Join(tmpDir, "api.go")
+
+	content := "const opCreateBucket = \"CreateBucket\"\n//   - ErrCodeNoSuchBucket \"NoSuchBucket\"\n"
+	if err := os.WriteFile(codeFile, []byte(content), 0644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	refs, err := scanCode(codeFile)
+	if err != nil {
+		t.Fatalf("scanCode failed: %v", err)
+	}
+	for _, ref := range refs {
+		if ref.Bucket == "CreateBucket" || ref.Bucket == "NoSuchBucket" {
+			t.Fatalf("expected an SDK constant with 'Bucket' as a bare suffix not to be captured, got refs: %+v", refs)
+		}
+	}
+}
+
+// TestScanCode_SnakeCaseAndS3PrefixedBucketNamesStillCaptured is the
+// regression guard: the WO-53 fix must not reject standalone keyword usage,
+// nor snake_case/kebab-case identifiers where "bucket" is a genuine
+// standalone word component (separated by "_" or "-", not concatenated
+// like the SDK-constant case above).
+func TestScanCode_SnakeCaseAndS3PrefixedBucketNamesStillCaptured(t *testing.T) {
+	tmpDir := t.TempDir()
+	codeFile := filepath.Join(tmpDir, "config.py")
+
+	content := "bucket = \"acme-standalone-bucket\"\n" +
+		"other_bucket = 'acme-snake-case-bucket'\n" +
+		"s3_bucket = \"acme-s3-prefixed-bucket\"\n" +
+		"s3Bucket = \"acme-camelcase-s3-bucket\"\n"
+	if err := os.WriteFile(codeFile, []byte(content), 0644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	refs, err := scanCode(codeFile)
+	if err != nil {
+		t.Fatalf("scanCode failed: %v", err)
+	}
+
+	buckets := make(map[string]bool)
+	for _, ref := range refs {
+		buckets[ref.Bucket] = true
+	}
+	for _, want := range []string{"acme-standalone-bucket", "acme-snake-case-bucket", "acme-s3-prefixed-bucket", "acme-camelcase-s3-bucket"} {
+		if !buckets[want] {
+			t.Fatalf("expected %q to still be captured, got refs: %+v", want, refs)
+		}
+	}
+}
+
 func TestIsPlaceholderBucketName(t *testing.T) {
 	cases := []struct {
 		name string
