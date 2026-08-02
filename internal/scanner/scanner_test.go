@@ -610,6 +610,72 @@ func TestScanCode_RealBucketNameSharingPlaceholderWordStillCaptured(t *testing.T
 	}
 }
 
+// TestScanCode_AWSNamespaceURINotCapturedAsBucket is the core WO-54
+// regression: AWS's own hardcoded S3 API XML namespace URI,
+// doc.s3.amazonaws.com, matches s3HTTPPattern's virtual-hosted-style URL
+// shape and was previously captured as if "doc" were a real bucket.
+// Reproduced against a real vendored AWS SDK source file.
+func TestScanCode_AWSNamespaceURINotCapturedAsBucket(t *testing.T) {
+	tmpDir := t.TempDir()
+	codeFile := filepath.Join(tmpDir, "api.go")
+
+	content := "// <BucketLoggingStatus xmlns=\"http://doc.s3.amazonaws.com/2006-03-01\" />\n" +
+		"url := \"https://acme-real-bucket.s3.amazonaws.com/key\"\n" +
+		"other := \"https://docs-archive-bucket.s3.amazonaws.com/file\"\n"
+	if err := os.WriteFile(codeFile, []byte(content), 0644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	refs, err := scanCode(codeFile)
+	if err != nil {
+		t.Fatalf("scanCode failed: %v", err)
+	}
+
+	buckets := make(map[string]bool)
+	for _, ref := range refs {
+		buckets[ref.Bucket] = true
+	}
+	if buckets["doc"] {
+		t.Fatalf("expected AWS's own doc.s3.amazonaws.com namespace URI not to be captured as a bucket, got refs: %+v", refs)
+	}
+	if !buckets["acme-real-bucket"] {
+		t.Fatalf("expected a real bucket-hosted URL to still be captured, got refs: %+v", refs)
+	}
+	if !buckets["docs-archive-bucket"] {
+		t.Fatalf("expected a real bucket merely starting with 'doc' to still be captured (exact-match denylist, not prefix suppression), got refs: %+v", refs)
+	}
+}
+
+// TestScanCode_DefaultBucketPlaceholderNotCaptured is the core WO-55
+// regression: a generic hardcoded default value seen in a real SDK-wrapper
+// library's options struct must not be reported as a real bucket reference.
+func TestScanCode_DefaultBucketPlaceholderNotCaptured(t *testing.T) {
+	tmpDir := t.TempDir()
+	codeFile := filepath.Join(tmpDir, "options.go")
+
+	content := "bucket: \"default-bucket\",\n" +
+		"other_bucket := \"default-bucket-prod\"\n"
+	if err := os.WriteFile(codeFile, []byte(content), 0644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	refs, err := scanCode(codeFile)
+	if err != nil {
+		t.Fatalf("scanCode failed: %v", err)
+	}
+
+	buckets := make(map[string]bool)
+	for _, ref := range refs {
+		buckets[ref.Bucket] = true
+	}
+	if buckets["default-bucket"] {
+		t.Fatalf("expected the 'default-bucket' placeholder to be filtered out, got refs: %+v", refs)
+	}
+	if !buckets["default-bucket-prod"] {
+		t.Fatalf("expected a real bucket merely containing 'default-bucket' as a substring to still be captured (exact-match denylist, not substring suppression), got refs: %+v", refs)
+	}
+}
+
 // TestScanEnv_S3URLPlaceholderFiltered is the WO-50 extension of the WO-49
 // placeholder-suppression fix to scanEnv's own s3URLPattern usage: a generic
 // example URL must not produce a phantom reference, while a real bucket name
@@ -872,6 +938,12 @@ func TestIsPlaceholderBucketName(t *testing.T) {
 		{"example-bucket", true},
 		{"acme-prod-data-bucket-42", false},
 		{"", false},
+		{"doc", true},
+		{"DOC", true},
+		{"docs-archive-bucket", false},
+		{"default-bucket", true},
+		{"DEFAULT-BUCKET", true},
+		{"default-bucket-prod", false},
 	}
 	for _, tt := range cases {
 		if got := isPlaceholderBucketName(tt.name); got != tt.want {
